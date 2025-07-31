@@ -1,4 +1,4 @@
-# from typing import Type
+from typing import Type
 
 from ayon_server.addons import BaseServerAddon
 # from ayon_server.api.dependencies import CurrentUser, ProjectName
