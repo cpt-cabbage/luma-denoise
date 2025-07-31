@@ -30,10 +30,10 @@ class LumaDenoiseSettings(BaseSettingsModel):
     """
     """
 
-    simple_string: str = SettingsField(
-        "default value",
-        title="Simple string",
-        description="This is a simple string",
+    denoise_exe_path: str = SettingsField(
+        "/opt/pixar/RenderManProServer-26.3/bin/denoise_batch",
+        title="Renderman Denoise Exec Path",
+        description="Path to the linux denoise executable",
     )
 
     textarea: str = SettingsField(
