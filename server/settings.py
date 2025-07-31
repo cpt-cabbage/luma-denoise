@@ -29,7 +29,19 @@ if TYPE_CHECKING:
 class LumaDenoiseSettings(BaseSettingsModel):
     """
     """
-    rmantree_path: str = SettingsField(
+    denoise_deadline_priority: int = SettingsField(
+        50,
+        title="Priority",
+        description="Deadline job priority",
+    )
+
+    denoise_pool: str = SettingsField(
+        "denoise_pool",
+        title="Pool",
+        description="Pool to use for denoising",
+    )
+    
+    denoise_rmantree_path: str = SettingsField(
         "/opt/pixar/RenderManProServer-26.3",
         title="Renderman Root Path",
         description="Path to RMAN ROOT",
@@ -37,11 +49,11 @@ class LumaDenoiseSettings(BaseSettingsModel):
 
     denoise_exe: str = SettingsField(
         "denoise_batch",
-        title="Renderman Denoise Exec Name",
+        title="Renderman Denoise Name",
         description="Name of the denoiser executable",
     )
 
-    pixar_lic: str = SettingsField(
+    denoise_pixar_lic: str = SettingsField(
         "9010@192.168.35.28",
         title="Renderman License Server",
         description="Renderman license server or file location",
