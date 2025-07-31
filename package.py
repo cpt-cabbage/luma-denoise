@@ -1,10 +1,13 @@
-name = "example"
-title = "Example"
-version = "2.1.0"
+name = "luma-denoise"
+title = "Luma Denoise"
+version = "0.0.1+dev"
 
-services = {
-    "ExampleService": {"image": "ynput/ayon-example-service"},
+client_dir = "luma_denoise"
+
+ayon_server_version = ">=1.10.3"
+ayon_required_addons = {
+    "core": ">=1.4.1",
+    "applications": ">=1.1.4",
+    "deadline": ">=0.5.12",
 }
-
-plugin_for = ["ayon_server"]
-build_command = ""
+ayon_compatible_addons = {}
