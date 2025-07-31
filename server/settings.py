@@ -29,25 +29,21 @@ if TYPE_CHECKING:
 class LumaDenoiseSettings(BaseSettingsModel):
     """
     """
-
-    denoise_exe_path: str = SettingsField(
-        "/opt/pixar/RenderManProServer-26.3/bin/denoise_batch",
-        title="Renderman Denoise Exec Path",
-        description="Path to the linux denoise executable",
+    rmantree_path: str = SettingsField(
+        "/opt/pixar/RenderManProServer-26.3",
+        title="Renderman Root Path",
+        description="Path to RMAN ROOT",
     )
 
-    textarea: str = SettingsField(
-        "",
-        title="Textarea",
-        widget="textarea",
-        placeholder="Placeholder of the textarea field",
+    denoise_exe: str = SettingsField(
+        "denoise_batch",
+        title="Renderman Denoise Exec Name",
+        description="Name of the denoiser executable",
     )
 
-    number: int = SettingsField(
-        1,
-        title="Number",
-        description="Positive integer 1-10",
-        gt=0,  # greater than
-        le=10,  # less or equal
-        placeholder="Placeholder of the number field",
+    pixar_lic: str = SettingsField(
+        "9010@192.168.35.28",
+        title="Renderman License Server",
+        description="Renderman license server or file location",
     )
+
