@@ -1,6 +1,7 @@
+from .addon import LumaDenoiseAddon
 from .version import __version__
 
 __all__ = (
-    "__version__",
-
+    "LumaDenoiseAddon",
+    "__version__"
 )
