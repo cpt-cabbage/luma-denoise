@@ -19,7 +19,7 @@ class LumaDenoiseAddon(
 
     def initialize(self, studio_settings):
         denoise_settings = studio_settings[self.name]
-
+        # self.log.info(f"LUMA : Loaded Denoise Addon.")
     def get_plugin_paths(self):
         return {
             "publish": [os.path.join(LUMA_DENOISE_HOST_DIR, "plugins", "publish")]
