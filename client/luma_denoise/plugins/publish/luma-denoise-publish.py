@@ -57,8 +57,12 @@ class LumaDenoiseUsdRender(
         job_info.Priority = job_priority
 
         # Set pool from settings
-        job_pool = denoise_settings.get("denoise_pool", "denoise_pool")
+        job_pool = denoise_settings.get("denoise_pool", "luma")
         job_info.Pool = job_pool
+
+        # Set group from settings
+        job_group = denoise_settings.get("denoise_group", "denoise_group")
+        job_info.Group = job_group
 
         # Set job dependencies if provided (should depend on render job)
         if dependency_job_ids:
@@ -76,9 +80,9 @@ class LumaDenoiseUsdRender(
             dirname = os.path.dirname(filepath)
             fname = os.path.basename(filepath)
             # For denoising, output goes to same directory but with _denoised suffix
-            denoised_fname = fname.replace('.exr', '_denoised.exr')
-            job_info.OutputDirectory += dirname.replace("\\", "/")
-            job_info.OutputFilename += denoised_fname
+            # denoised_fname = fname.replace('.exr', '_denoised.exr')
+            job_info.OutputDirectory += os.path.join(dirname, 'denoised').replace("\\", "/")
+            job_info.OutputFilename += fname
 
         self.log.info(f"Job info configured for denoising: {job_name} (Priority: {job_priority}, Pool: {job_pool})")
 
@@ -95,7 +99,7 @@ class LumaDenoiseUsdRender(
         # Build the executable path from settings
         rman_root = denoise_settings.get("denoise_rmantree_path", "/opt/pixar/RenderManProServer-26.3")
         denoise_exe_name = denoise_settings.get("denoise_exe", "denoise_batch")
-        executable_path = os.path.join(rman_root, "bin", denoise_exe_name)
+        executable_path = os.path.join(rman_root, "bin", denoise_exe_name).replace("\\", "/")
 
         # For denoising, we need to handle per-frame processing
         # Deadline will substitute frame numbers in the arguments
@@ -118,7 +122,7 @@ class LumaDenoiseUsdRender(
             args += ' --progress'
             # args += ' -cf'
             args += ' -o ' + os.path.join(dirname, 'denoised')
-            args += ' ' + os.path.join(dirname, basename)
+            args += ' ' + os.path.join(dirname, basename).replace("\\", "/")
             args += ' ' + str(instance.data.get("frameStartHandle", 1)) + '-' + str(instance.data.get("frameEndHandle", 1))
 
             # arguments = f'--input "{os.path.join(dirname, frame_pattern)}" --output "{os.path.join(dirname, output_pattern)}"'
@@ -183,6 +187,11 @@ class LumaDenoiseUsdRender(
         job_info = self.get_generic_job_info(instance)
         self.job_info = self.get_job_info(job_info=deepcopy(job_info), dependency_job_ids=[render_job_id])
 
+        # Add Pixar license environment variable from settings
+        pixar_license = denoise_settings.get("denoise_pixar_lic", "")
+        if pixar_license:
+            self.job_info.EnvironmentKeyValue["PIXAR_LICENSE_FILE"] = pixar_license
+
         # Set up plugin info for denoising
         self.plugin_info = self.get_plugin_info()
         self.aux_files = self.get_aux_files()
@@ -209,3 +218,4 @@ class LumaDenoiseUsdRender(
 
 
     
+
