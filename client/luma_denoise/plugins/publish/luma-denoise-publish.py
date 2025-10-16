@@ -108,15 +108,24 @@ class LumaDenoiseUsdRender(
 
             # Extract frame pattern - assuming files follow naming convention
             # This is a simplified approach - in practice you might need more robust parsing
-            frame_pattern = basename.replace('.exr', '.<STARTFRAME>.exr')
-            output_pattern = basename.replace('.exr', '.<STARTFRAME>_denoised.exr')
+            # frame_pattern = basename.replace('.####.exr', '.<STARTFRAME>.exr')
+            # output_pattern = basename.replace('.####.exr', '_denoised.<STARTFRAME>.exr')
 
             # Build the denoise command arguments using Deadline frame substitution
-            arguments = f'--input "{os.path.join(dirname, frame_pattern)}" --output "{os.path.join(dirname, output_pattern)}"'
+            args  = ' -a 0'
+            args += ' -v'
+            args += ' --clean-alpha'
+            args += ' --progress'
+            # args += ' -cf'
+            args += ' -o ' + os.path.join(dirname, 'denoised')
+            args += ' ' + os.path.join(dirname, basename)
+            args += ' ' + str(instance.data.get("frameStartHandle", 1)) + '-' + str(instance.data.get("frameEndHandle", 1))
+
+            # arguments = f'--input "{os.path.join(dirname, frame_pattern)}" --output "{os.path.join(dirname, output_pattern)}"'
 
             plugin_info = CommandLinePluginInfo(
                 Executable=executable_path,
-                Arguments=arguments,
+                Arguments=args,
                 StartupDirectory=dirname,
                 SingleFramesOnly=True  # Each frame is processed independently
             )
@@ -152,13 +161,17 @@ class LumaDenoiseUsdRender(
         # We need to find the render job ID and submit our denoise job as dependent
 
         # Get the render job ID from the instance data (set by the render plugin)
-        render_job_id = instance.data.get("deadline", {}).get("job_info", {}).get("job_id")
+        render_job_id = None
+        if "deadlineSubmissionJob" in instance.data:
+            submission_job = instance.data["deadlineSubmissionJob"]
+            if isinstance(submission_job, dict) and "_id" in submission_job:
+                render_job_id = submission_job["_id"]
+            elif hasattr(submission_job, '_id'):
+                render_job_id = submission_job._id
+
         if not render_job_id:
-            # Try alternative locations where the job ID might be stored
-            render_job_id = instance.data.get("deadlineSubmissionJob", {}).get("_id")
-            if not render_job_id:
-                self.log.warning("Could not find render job ID for dependency. Skipping denoise submission.")
-                return
+            self.log.warning("Could not find render job ID for dependency. Skipping denoise submission.")
+            return
 
         # Set up our denoise job with dependency on the render job
         context = instance.context
