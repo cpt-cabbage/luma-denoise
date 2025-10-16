@@ -29,6 +29,12 @@ if TYPE_CHECKING:
 class LumaDenoiseSettings(BaseSettingsModel):
     """
     """
+    denoise_enabled: bool = SettingsField(
+        False,
+        title="Enable Denoising",
+        description="Enable automatic denoising of rendered EXR files",
+    )
+
     denoise_deadline_priority: int = SettingsField(
         50,
         title="Priority",
@@ -36,9 +42,15 @@ class LumaDenoiseSettings(BaseSettingsModel):
     )
 
     denoise_pool: str = SettingsField(
-        "denoise_pool",
+        "luma",
         title="Pool",
         description="Pool to use for denoising",
+    )
+
+    denoise_group: str = SettingsField(
+        "denoise_group",
+        title="Group",
+        description="Group to use for denoising",
     )
     
     denoise_rmantree_path: str = SettingsField(
