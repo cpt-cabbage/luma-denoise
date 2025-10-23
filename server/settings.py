@@ -26,6 +26,7 @@ from ayon_server.types import (
 if TYPE_CHECKING:
     from ayon_server.addons import BaseServerAddon
 
+
 class LumaDenoiseSettings(BaseSettingsModel):
     """
     """
@@ -52,7 +53,7 @@ class LumaDenoiseSettings(BaseSettingsModel):
         title="Group",
         description="Group to use for denoising",
     )
-    
+
     denoise_rmantree_path: str = SettingsField(
         "/opt/pixar/RenderManProServer-26.3",
         title="Renderman Root Path",
@@ -69,5 +70,116 @@ class LumaDenoiseSettings(BaseSettingsModel):
         "9010@192.168.35.28",
         title="Renderman License Server",
         description="Renderman license server or file location",
+    )
+
+    # OIIO combine settings - always enabled by default
+    oiio_enabled: bool = SettingsField(
+        True,
+        title="Enable OIIO Combine",
+        description="Enable OIIO combine processing (always enabled)",
+    )
+
+    oiio_root_path: str = SettingsField(
+        "/opt/oiio",
+        title="OIIO Root Path",
+        description="Path to OIIO installation root",
+    )
+
+    oiio_exe: str = SettingsField(
+        "oiiotool",
+        title="OIIO Executable Name",
+        description="Name of the OIIO executable",
+    )
+
+    combine_deadline_priority: int = SettingsField(
+        50,
+        title="OIIO Combine Deadline Priority",
+        description="Deadline job priority for OIIO combine",
+    )
+
+    combine_pool: str = SettingsField(
+        "default",
+        title="OIIO Combine Pool",
+        description="Deadline pool for OIIO combine jobs",
+    )
+
+    combine_group: str = SettingsField(
+        "default",
+        title="OIIO Combine Group",
+        description="Deadline group for OIIO combine jobs",
+    )
+
+    # AOV configuration options
+    include_aovs: bool = SettingsField(
+        True,
+        title="Include AOVs",
+        description="Include AOVs in combine processing",
+    )
+
+    crypto_materials: bool = SettingsField(
+        True,
+        title="Crypto Materials",
+        description="Include crypto materials AOV",
+    )
+
+    crypto_primitives: bool = SettingsField(
+        False,
+        title="Crypto Primitives",
+        description="Include crypto primitives AOV",
+    )
+
+    diffuse: bool = SettingsField(
+        True,
+        title="Diffuse",
+        description="Include diffuse AOV",
+    )
+
+    specular: bool = SettingsField(
+        True,
+        title="Specular",
+        description="Include specular AOV",
+    )
+
+    albedo: bool = SettingsField(
+        False,
+        title="Albedo",
+        description="Include albedo AOV",
+    )
+
+    normals: bool = SettingsField(
+        True,
+        title="Normals",
+        description="Include normals AOV",
+    )
+
+    position: bool = SettingsField(
+        True,
+        title="Position",
+        description="Include position AOV",
+    )
+
+    uv: bool = SettingsField(
+        False,
+        title="UV",
+        description="Include UV AOV",
+    )
+
+    depth: bool = SettingsField(
+        False,
+        title="Depth",
+        description="Include depth AOV",
+    )
+
+    # Output configuration
+    output_subdirectory: str = SettingsField(
+        "combined",
+        title="Output Subdirectory",
+        description="Subdirectory for combined output files",
+    )
+
+    preserve_intermediates: bool = SettingsField(
+        False,
+        title="Preserve Intermediates",
+        description="Keep intermediate files after processing",
     )
 
