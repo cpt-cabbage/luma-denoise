@@ -12,8 +12,8 @@ class CommandLinePluginInfo:
     Arguments: str = field(default=None)
     StartupDirectory: str = field(default=None)
     SingleFramesOnly: bool = field(default=False)
-
-
+    ShellExecute: bool = field(default=False)
+    Shell: str = field(default=None)
 
 class LumaDenoiseUsdRender(
         abstract_submit_deadline.AbstractSubmitDeadline,
@@ -41,7 +41,7 @@ class LumaDenoiseUsdRender(
 
         # Get denoise settings from project settings
         project_settings = context.data["project_settings"]
-        denoise_settings = project_settings.get("luma-denoise", {})
+        denoise_settings = project_settings["luma-denoise"]
 
         filepath = context.data["currentFile"]
         scenename = os.path.basename(filepath)
@@ -73,18 +73,15 @@ class LumaDenoiseUsdRender(
         start_frame = instance.data.get("frameStartHandle", 1)
         end_frame = instance.data.get("frameEndHandle", 1)
         step = instance.data.get("byFrameStep", 1)
-        job_info.Frames = f"{int(start_frame)}-{int(end_frame)}x{int(step)}"
+        job_info.Frames = 1
 
         # Set output directories and filenames for denoising results
-        for i, filepath in enumerate(instance.data["files"]):
-            dirname = os.path.dirname(filepath)
-            fname = os.path.basename(filepath)
-            # For denoising, output goes to same directory but with _denoised suffix
-            # denoised_fname = fname.replace('.exr', '_denoised.exr')
-            job_info.OutputDirectory += os.path.join(dirname, 'denoised').replace("\\", "/")
-            job_info.OutputFilename += fname
-
-        self.log.info(f"Job info configured for denoising: {job_name} (Priority: {job_priority}, Pool: {job_pool})")
+        dirname = os.path.dirname(instance.data["files"][0])
+        fname = os.path.basename(instance.data["files"][0])
+        # For denoising, output goes to same directory but with _denoised suffix
+        # denoised_fname = fname.replace('.exr', '_denoised.exr')
+        job_info.OutputDirectory[0] = os.path.join(dirname, 'denoised').replace("\\", "/")
+        job_info.OutputFilename[0] = fname
 
         return job_info
 
@@ -94,7 +91,7 @@ class LumaDenoiseUsdRender(
 
         # Get denoise settings from project settings
         project_settings = instance.context.data["project_settings"]
-        denoise_settings = project_settings.get("luma-denoise", {})
+        denoise_settings = project_settings["luma-denoise"]
 
         # Build the executable path from settings
         rman_root = denoise_settings.get("denoise_rmantree_path", "/opt/pixar/RenderManProServer-26.3")
@@ -116,12 +113,12 @@ class LumaDenoiseUsdRender(
             # output_pattern = basename.replace('.####.exr', '_denoised.<STARTFRAME>.exr')
 
             # Build the denoise command arguments using Deadline frame substitution
-            args  = ' -a 0'
+            args = r' -a 0'
             args += ' -v'
             args += ' --clean-alpha'
             args += ' --progress'
             # args += ' -cf'
-            args += ' -o ' + os.path.join(dirname, 'denoised')
+            args += r' -o ' + os.path.join(dirname, 'denoised')
             args += ' ' + os.path.join(dirname, basename).replace("\\", "/")
             args += ' ' + str(instance.data.get("frameStartHandle", 1)) + '-' + str(instance.data.get("frameEndHandle", 1))
 
@@ -131,28 +128,59 @@ class LumaDenoiseUsdRender(
                 Executable=executable_path,
                 Arguments=args,
                 StartupDirectory=dirname,
-                SingleFramesOnly=True  # Each frame is processed independently
+                SingleFramesOnly=False,
+                ShellExecute=False,
+                Shell="cmd"  # Each frame is processed independently
             )
         else:
             # Fallback if no files
             plugin_info = CommandLinePluginInfo(
                 Executable="echo",
                 Arguments="No files to denoise",
-                SingleFramesOnly=True
+                SingleFramesOnly=False,
+                ShellExecute=True,
+                Shell="cmd" 
             )
 
         plugin_payload = asdict(plugin_info)
-        self.log.info(f"Plugin info configured for denoising: {len(files)} files using {executable_path}")
         return plugin_payload
+
+    def get_denoise_enabled(self, instance):
+        """Consolidate denoise logic: settings checking, publish attributes handling, default value assignment."""
+        project_settings = instance.context.data["project_settings"]
+
+        # Use only luma-denoise settings
+        denoise_settings = project_settings["luma-denoise"]
+
+        # Check if denoising is enabled in settings
+        if not denoise_settings.get("denoise_enabled", False):
+            self.log.info("Denoising disabled in 'luma-denoise' settings.")
+            return False
+
+        # Get default enabled state from settings
+        default_enabled = denoise_settings.get("denoise_enabled", True)
+
+        # The denoise value is now set by HoudiniSubmitDeadlineUsdRender plugin
+        # Skip if already set in instance.data by the deadline submission
+        # (but still need to validate against settings)
+
+
+        # Fall back to default
+        self.log.info(f"Using default denoise value: {default_enabled}")
+        return default_enabled
 
     def process(self, instance):
         self._instance = instance
 
-        # Check if denoising is enabled in project settings
-        project_settings = instance.context.data["project_settings"]
-        denoise_settings = project_settings.get("luma-denoise", {})
-        if not denoise_settings.get("denoise_enabled", False):
-            self.log.info("Denoising disabled in project settings, skipping.")
+        # Consolidate denoise logic and set instance.data["denoise"] if not already set
+        if "denoise" not in instance.data:
+            instance.data["denoise"] = self.get_denoise_enabled(instance)
+
+        denoise_enabled = instance.data["denoise"]
+        self.log.info(f"Denoise enabled for instance: {denoise_enabled}")
+
+        if not denoise_enabled:
+            self.log.info("Denoising disabled for this instance, skipping.")
             return
 
         # Ensure we have files to denoise
@@ -187,10 +215,24 @@ class LumaDenoiseUsdRender(
         job_info = self.get_generic_job_info(instance)
         self.job_info = self.get_job_info(job_info=deepcopy(job_info), dependency_job_ids=[render_job_id])
 
+        # Get project settings for denoise configuration
+        project_settings = context.data["project_settings"]
+        denoise_settings = project_settings["luma-denoise"]
+
         # Add Pixar license environment variable from settings
         pixar_license = denoise_settings.get("denoise_pixar_lic", "")
         if pixar_license:
             self.job_info.EnvironmentKeyValue["PIXAR_LICENSE_FILE"] = pixar_license
+            
+        # Add PATH environment variable from settings
+        rmPATH = denoise_settings.get("denoise_rmantree_path", "") + R"/bin"
+        if pixar_license:
+            self.job_info.EnvironmentKeyValue["PATH"] = rmPATH
+
+        # Add RMANTREE environment variable from settings
+        rmTREE = denoise_settings.get("denoise_rmantree_path", "")
+        if pixar_license:
+            self.job_info.EnvironmentKeyValue["RMANTREE"] = rmTREE
 
         # Set up plugin info for denoising
         self.plugin_info = self.get_plugin_info()
@@ -204,6 +246,9 @@ class LumaDenoiseUsdRender(
         # Submit the denoise job
         job_id = self.process_submission()
         self.log.info(f"Submitted denoise job to Deadline: {job_id} (depends on render job {render_job_id})")
+
+        # Store the denoise job ID for OIIO combine plugin dependency
+        instance.data["denoise_job_id"] = job_id
 
         # Store output directory for unified publisher
         output_dir = os.path.dirname(instance.data["files"][0])

@@ -5,6 +5,7 @@ import pyblish.api
 
 from ayon_core.pipeline import AYONPyblishPluginMixin
 from ayon_deadline import abstract_submit_deadline
+from ayon_core.lib.vendor_bin_utils import get_oiio_tools_path
 
 @dataclass
 class CommandLinePluginInfo:
@@ -12,6 +13,8 @@ class CommandLinePluginInfo:
     Arguments: str = field(default=None)
     StartupDirectory: str = field(default=None)
     SingleFramesOnly: bool = field(default=False)
+    ShellExecute: bool = field(default=False)
+    Shell: str = field(default=None)
 
 
 class ExtractOiioCombine(
@@ -24,7 +27,7 @@ class ExtractOiioCombine(
     """
 
     label = "Submit OIIO Combine to Deadline"
-    order = pyblish.api.ExtractorOrder + 0.1
+    order = pyblish.api.IntegratorOrder + 0.11
     hosts = ["houdini"]
     families = ["usdrender"]
     targets = ["local"]
@@ -82,10 +85,13 @@ class ExtractOiioCombine(
             shot_name = filename.split('.')[0]
             extension = filename.split('.')[-1]
             combined_dir = os.path.join(dirname, output_subdirectory)
-            job_info.OutputDirectory = combined_dir.replace("\\", "/")
-            job_info.OutputFilename = f'{shot_name}.<STARTFRAME%4>.{extension}'
 
-        self.log.info(f"Job info configured for OIIO combine: {job_name} (Priority: {job_priority}, Pool: {job_pool})")
+            # Ensure the output directory exists
+            os.makedirs(combined_dir, exist_ok=True)
+
+            job_info.OutputDirectory[0] = combined_dir.replace("\\", "/")
+            job_info.OutputFilename[0] = f'{shot_name}.<STARTFRAME%4>.{extension}'
+
 
         return job_info
 
@@ -98,9 +104,10 @@ class ExtractOiioCombine(
         oiio_settings = project_settings.get("luma-denoise", {})
 
         # Build the executable path from settings
-        oiio_root = oiio_settings.get("oiio_root_path", "/opt/oiio")
-        oiio_exe_name = oiio_settings.get("oiio_exe", "oiiotool")
-        executable_path = os.path.join(oiio_root, "bin", oiio_exe_name).replace("\\", "/")
+        oiio_root = oiio_settings.get("oiio_root_path", "L:\tools\_studio_tools\AYON\AYON-1.3.3-windows\addons_resources\ayon_third_party\oiio_windows_83e412e9") 
+
+        executable_path = oiio_root + r"\bin\oiiotool.exe"
+        os.environ["PATH"] += os.pathsep + oiio_root
 
         # For combining, we need to handle per-frame processing
         if files:
@@ -116,6 +123,10 @@ class ExtractOiioCombine(
             renders_path = os.path.join(dirname, f'{shot_name}.<STARTFRAME%4>.{extension}')
             output_subdirectory = oiio_settings.get("output_subdirectory", "combined")
             output_path = os.path.join(dirname, output_subdirectory, f'{shot_name}.<STARTFRAME%4>.{extension}')
+
+            # Ensure output directory exists
+            output_dir = os.path.dirname(output_path)
+            os.makedirs(output_dir, exist_ok=True)
 
             # Get AOV settings
             include_aovs = oiio_settings.get("include_aovs", True)
@@ -133,8 +144,8 @@ class ExtractOiioCombine(
             passdict = {}
 
             if include_aovs:
-                OIIO_args += f'"{denoised_path}"'
-                OIIO_args += " --ch Beauty.R,Beauty.G,Beauty.B,a.Z"
+                OIIO_args += denoised_path
+                OIIO_args += r" --ch Beauty.R,Beauty.G,Beauty.B,a.Z"
                 if crypto_materials:
                     passdict["CryptoMaterials"] = ["CryptoMaterials.R","CryptoMaterials.G","CryptoMaterials.B"]
                     OIIO_args += ",CryptoMaterials.R,CryptoMaterials.G,CryptoMaterials.B"
@@ -159,8 +170,8 @@ class ExtractOiioCombine(
                 if depth:
                     passdict["zfiltered"] = ["zfiltered.Z"]
                     OIIO_args += ",zfiltered.Z"
-                OIIO_args += f' "{renders_path}"'
-                OIIO_args += ' --ch '
+                OIIO_args += " " + renders_path
+                OIIO_args += r' --ch '
                 if crypto_materials:
                     OIIO_args += 'CryptoMaterials00.R,CryptoMaterials00.G,CryptoMaterials00.B,CryptoMaterials00.A,CryptoMaterials01.R,CryptoMaterials01.G,CryptoMaterials01.B,CryptoMaterials01.A,CryptoMaterials02.R,CryptoMaterials02.G,CryptoMaterials02.B,CryptoMaterials02.A'
                 if crypto_primitives:
@@ -172,8 +183,8 @@ class ExtractOiioCombine(
                         OIIO_args += ","
                     OIIO_args += "normal.x,normal.y,normal.z"
 
-                OIIO_args += ' --chappend'
-                OIIO_args += ' --chnames R,G,B,A'
+                OIIO_args += r' --chappend'
+                OIIO_args += r' --chnames R,G,B,A'
                 if crypto_materials:
                     OIIO_args += ",CryptoMaterials.R,CryptoMaterials.G,CryptoMaterials.B"
                 if crypto_primitives:
@@ -196,35 +207,37 @@ class ExtractOiioCombine(
                     OIIO_args += ',CryptoPrimitives00.R,CryptoPrimitives00.G,CryptoPrimitives00.B,CryptoPrimitives00.A,CryptoPrimitives01.R,CryptoPrimitives01.G,CryptoPrimitives01.B,CryptoPrimitives01.A,CryptoPrimitives02.R,CryptoPrimitives02.G,CryptoPrimitives02.B,CryptoPrimitives02.A'
                 if normals:
                     OIIO_args += ",normal.x,normal.y,normal.z"
-                OIIO_args += f' -o "{output_path}"'
+                OIIO_args += r' -o ' + output_path
 
                 # Store passdict in instance data for later use
                 instance.data["passdict"] = passdict
 
             else:
                 # DEFAULT SUBMISSION
-                OIIO_args += f'"{denoised_path}"'
-                OIIO_args += " --ch Beauty.R,Beauty.G,Beauty.B,Alpha,CryptoMaterials.R,CryptoMaterials.G,CryptoMaterials.B, "
-                OIIO_args += f'"{renders_path}"'
-                OIIO_args += ' --ch CryptoMaterials00.R,CryptoMaterials00.G,CryptoMaterials00.B,CryptoMaterials00.A,CryptoMaterials01.R,CryptoMaterials01.G,CryptoMaterials01.B,CryptoMaterials01.A,CryptoMaterials02.R,CryptoMaterials02.G,CryptoMaterials02.B,CryptoMaterials02.A  --chappend --chnames R,G,B,A,CryptoMaterials.R,CryptoMaterials.G,CryptoMaterials.B,CryptoMaterials00.R,CryptoMaterials00.G,CryptoMaterials00.B,CryptoMaterials00.A,CryptoMaterials01.R,CryptoMaterials01.G,CryptoMaterials01.B,CryptoMaterials01.A,CryptoMaterials02.R,CryptoMaterials02.G,CryptoMaterials02.B,CryptoMaterials02.A '
-                OIIO_args += f'-o "{output_path}"'
-
+                OIIO_args += denoised_path
+                OIIO_args += r" --ch Beauty.R,Beauty.G,Beauty.B,Alpha,CryptoMaterials.R,CryptoMaterials.G,CryptoMaterials.B, "
+                OIIO_args += renders_path
+                OIIO_args += r' --ch CryptoMaterials00.R,CryptoMaterials00.G,CryptoMaterials00.B,CryptoMaterials00.A,CryptoMaterials01.R,CryptoMaterials01.G,CryptoMaterials01.B,CryptoMaterials01.A,CryptoMaterials02.R,CryptoMaterials02.G,CryptoMaterials02.B,CryptoMaterials02.A  --chappend --chnames R,G,B,A,CryptoMaterials.R,CryptoMaterials.G,CryptoMaterials.B,CryptoMaterials00.R,CryptoMaterials00.G,CryptoMaterials00.B,CryptoMaterials00.A,CryptoMaterials01.R,CryptoMaterials01.G,CryptoMaterials01.B,CryptoMaterials01.A,CryptoMaterials02.R,CryptoMaterials02.G,CryptoMaterials02.B,CryptoMaterials02.A '
+                OIIO_args += r' -o ' + output_path
             plugin_info = CommandLinePluginInfo(
                 Executable=executable_path,
                 Arguments=OIIO_args,
                 StartupDirectory=dirname,
-                SingleFramesOnly=True  # Each frame is processed independently
+                SingleFramesOnly=True,
+                ShellExecute=False,
+                Shell="cmd"  # Each frame is processed independently
             )
         else:
             # Fallback if no files
             plugin_info = CommandLinePluginInfo(
                 Executable="echo",
                 Arguments="No files to combine",
-                SingleFramesOnly=True
+                SingleFramesOnly=True,
+                ShellExecute=False,
+                Shell="cmd"
             )
 
         plugin_payload = asdict(plugin_info)
-        self.log.info(f"Plugin info configured for OIIO combine: {len(files)} files using {executable_path}")
         return plugin_payload
 
     def process(self, instance):
@@ -236,6 +249,20 @@ class ExtractOiioCombine(
             oiio_settings = project_settings.get("luma-denoise", {})
             if not oiio_settings.get("oiio_enabled", True):
                 self.log.info("OIIO combine disabled in project settings, skipping.")
+                return
+
+            # Check if denoise is enabled for this instance
+            # First check instance.data (set by collect_render_denoise from ayon-houdini)
+            # Fall back to project settings if not set
+            denoise_enabled = instance.data.get("denoise")
+            if denoise_enabled is None:
+                # If not set by collector, check project settings default
+                project_settings = instance.context.data["project_settings"]
+                denoise_settings = project_settings.get("luma-denoise", {})
+                denoise_enabled = denoise_settings.get("denoise_enabled", True)
+
+            if not denoise_enabled:
+                self.log.info("Denoise is disabled for this instance, skipping OIIO combine.")
                 return
 
             # Ensure we have files to combine
@@ -272,12 +299,12 @@ class ExtractOiioCombine(
 
             # Submit the combine job
             job_id = self.process_submission()
-            self.log.info(f"Submitted OIIO combine job to Deadline: {job_id} (depends on denoise job {denoise_job_id})")
 
             # Store output directory for unified publisher
             output_dir = os.path.dirname(instance.data["files"][0])
             instance.data["outputDir"] = output_dir
             instance.data["toBeRenderedOn"] = "deadline"
+            instance.data["stagingDir"] = oiio_settings.get("output_subdirectory", "combined")
 
             instance.data["deadline"]["job_info"] = deepcopy(self.job_info)
 
