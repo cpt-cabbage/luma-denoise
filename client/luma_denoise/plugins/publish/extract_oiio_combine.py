@@ -299,6 +299,10 @@ class ExtractOiioCombine(
 
             # Submit the combine job
             job_id = self.process_submission()
+            self.log.info(f"Submitted OIIO combine job to Deadline: {job_id} (depends on denoise job {denoise_job_id})")
+
+            # Store the OIIO combine job ID for downstream dependencies (e.g., review extraction)
+            instance.data["oiio_combine_job_id"] = job_id
 
             # Store output directory for unified publisher
             output_dir = os.path.dirname(instance.data["files"][0])

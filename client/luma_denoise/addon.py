@@ -22,7 +22,8 @@ class LumaDenoiseAddon(
         self.log.info("LUMA Denoise Addon initialized.")
     def get_plugin_paths(self):
         return {
-            "publish": [os.path.join(LUMA_DENOISE_HOST_DIR, "plugins", "publish")]
+            "publish": [os.path.join(LUMA_DENOISE_HOST_DIR, "plugins", "publish")],
+            "actions": [os.path.join(LUMA_DENOISE_HOST_DIR, "plugins", "actions")]
         }
 
     def add_implementation_envs(self, env, _app):

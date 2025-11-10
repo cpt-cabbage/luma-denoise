@@ -1,0 +1,37 @@
+{
+
+    "python.analysis.extraPaths": [
+        // AYON Server Backend
+        //"./ayon-backend",
+
+        // AYON client code.
+        // "./ayon-applications/client",
+        // "./ayon-blender/client",
+        "C:/Users/christophe.leyder/AppData/Local/Ynput/AYON/addons/core_1.6.6/ayon_core",
+        // "./ayon-deadline/client",
+        // "./ayon-houdini/client",
+        // "./ayon-maya/client",
+        // "./ayon-nuke/client",
+        // "./ayon-ocio/client",
+        // "./ayon-python-api",
+        // "./ayon-third-party/client",
+        // "./ayon-traypublisher/client",
+        // "./ayon-shotgrid/client",
+        // "./ayon-unreal/client",
+        // "./ayon-jira/client",
+        // "./ayon-version-control/client",
+        // "./example-studio-addon/client",
+        // "./ayon-ayon-aquarium/client",
+
+        // "./ayon-launcher/common",
+        
+        // DCC specific code.
+        // "C:/Program Files/Side Effects Software/Houdini 19.5.805/houdini/python3.9libs",
+        //"C:/Program Files/Side Effects Software/Houdini 20.5.370/houdini/python3.11libs",
+
+        // Dependecy package. Expand the the env var to the full path if the following env var didn't work.
+        //                    Also, don't forget to replace the path with your actual dependency package.
+        "${env:LOCALAPPDATA}/Ynput/AYON/dependency_packages/ayon_2510231653_windows.zip/runtime",
+        "${env:LOCALAPPDATA}/Ynput/AYON/dependency_packages/ayon_2510231653_windows.zip/dependencies",
+    ],
+}
