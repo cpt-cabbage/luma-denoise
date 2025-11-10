@@ -1,4 +1,6 @@
 import os
+import sys
+import json
 from copy import deepcopy
 from dataclasses import dataclass, field, asdict
 import pyblish.api
@@ -6,6 +8,14 @@ import pyblish.api
 from ayon_core.pipeline import AYONPyblishPluginMixin
 from ayon_deadline import abstract_submit_deadline
 from ayon_core.lib.vendor_bin_utils import get_oiio_tools_path
+
+# Import pass builder utilities
+sys.path.append(r"L:\tools\_studio_tools\AYON\_dev\christophe\la_shot_tools\luma_tools\python")
+try:
+    from render_service import load_pass_config, build_oiio_command
+    PASS_BUILDER_AVAILABLE = True
+except ImportError:
+    PASS_BUILDER_AVAILABLE = False
 
 @dataclass
 class CommandLinePluginInfo:
@@ -104,7 +114,7 @@ class ExtractOiioCombine(
         oiio_settings = project_settings.get("luma-denoise", {})
 
         # Build the executable path from settings
-        oiio_root = oiio_settings.get("oiio_root_path", "L:\tools\_studio_tools\AYON\AYON-1.3.3-windows\addons_resources\ayon_third_party\oiio_windows_83e412e9") 
+        oiio_root = oiio_settings.get("oiio_root_path", "L:\tools\_studio_tools\AYON\AYON-1.3.3-windows\addons_resources\ayon_third_party\oiio_windows_83e412e9")
 
         executable_path = oiio_root + r"\bin\oiiotool.exe"
         os.environ["PATH"] += os.pathsep + oiio_root
@@ -128,22 +138,75 @@ class ExtractOiioCombine(
             output_dir = os.path.dirname(output_path)
             os.makedirs(output_dir, exist_ok=True)
 
-            # Get AOV settings
-            include_aovs = oiio_settings.get("include_aovs", True)
-            crypto_materials = oiio_settings.get("crypto_materials", True)
-            crypto_primitives = oiio_settings.get("crypto_primitives", False)
-            diffuse = oiio_settings.get("diffuse", True)
-            specular = oiio_settings.get("specular", True)
-            albedo = oiio_settings.get("albedo", False)
-            normals = oiio_settings.get("normals", True)
-            position = oiio_settings.get("position", True)
-            uv = oiio_settings.get("uv", False)
-            depth = oiio_settings.get("depth", False)
+            # Check for passes file first (from pass_builder)
+            # Navigate up from renders directory to find task work directory
+            # Path structure: .../work/{task}/img/renders/version/file.exr
+            # We need: .../work/{task}/shot_data/shot_name.json
+
+            # Get task name from instance
+            task_entity = instance.data.get("taskEntity")
+            task_name = task_entity.get("name") if task_entity else None
+            self.log.debug(f"Task name from instance: {task_name}")
+
+            # Navigate up to find task directory
+            task_dir = dirname
+            if task_name:
+                # Go up directories until we find the task directory
+                for _ in range(5):  # Safety limit to prevent infinite loop
+                    parent = os.path.dirname(task_dir)
+                    if os.path.basename(task_dir) == task_name:
+                        break
+                    task_dir = parent
+                self.log.debug(f"Resolved task directory: {task_dir}")
+
+            shot_data_dir = os.path.join(task_dir, "shot_data")
+            passes_file = os.path.join(shot_data_dir, f"{shot_name}.json")
+            self.log.debug(f"Looking for passes file: {passes_file}")
 
             OIIO_args = ''
             passdict = {}
 
-            if include_aovs:
+            if PASS_BUILDER_AVAILABLE and os.path.isfile(passes_file):
+                # Use pass builder logic when passes file exists
+                self.log.info(f"Using passes file: {passes_file}")
+                try:
+                    passes_dict = load_pass_config(passes_file)
+                    if passes_dict:
+                        # Use the pass_builder's build_oiio_command function
+                        OIIO_args = build_oiio_command(passes_dict, denoised_path, renders_path, output_path)
+                        # Store passes dict for reference
+                        passdict = passes_dict
+                        instance.data["passdict"] = passdict
+                        self.log.info(f"Built OIIO command from passes file with {len(passes_dict)} passes")
+                    else:
+                        self.log.warning(f"Passes file is empty, falling back to OIIO settings")
+                        # Fall through to settings-based logic below
+                        passes_dict = None
+                except Exception as e:
+                    self.log.warning(f"Failed to load passes file: {e}, falling back to OIIO settings")
+                    passes_dict = None
+            else:
+                if not PASS_BUILDER_AVAILABLE:
+                    self.log.info("Pass builder module not available, using OIIO settings")
+                else:
+                    self.log.info(f"Passes file not found: {passes_file}, using OIIO settings")
+                passes_dict = None
+
+            # Fallback to settings-based configuration if passes file not used
+            if not OIIO_args:
+                # Get AOV settings from project settings
+                include_aovs = oiio_settings.get("include_aovs", True)
+                crypto_materials = oiio_settings.get("crypto_materials", True)
+                crypto_primitives = oiio_settings.get("crypto_primitives", False)
+                diffuse = oiio_settings.get("diffuse", True)
+                specular = oiio_settings.get("specular", True)
+                albedo = oiio_settings.get("albedo", False)
+                normals = oiio_settings.get("normals", True)
+                position = oiio_settings.get("position", True)
+                uv = oiio_settings.get("uv", False)
+                depth = oiio_settings.get("depth", False)
+
+            if not OIIO_args and include_aovs:
                 OIIO_args += denoised_path
                 OIIO_args += r" --ch Beauty.R,Beauty.G,Beauty.B,a.Z"
                 if crypto_materials:
@@ -212,8 +275,8 @@ class ExtractOiioCombine(
                 # Store passdict in instance data for later use
                 instance.data["passdict"] = passdict
 
-            else:
-                # DEFAULT SUBMISSION
+            elif not OIIO_args:
+                # DEFAULT SUBMISSION (when include_aovs is False)
                 OIIO_args += denoised_path
                 OIIO_args += r" --ch Beauty.R,Beauty.G,Beauty.B,Alpha,CryptoMaterials.R,CryptoMaterials.G,CryptoMaterials.B, "
                 OIIO_args += renders_path

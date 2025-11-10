@@ -9,3 +9,4 @@ frontend/dist
 frontend/.env
 frontend/yarn.lock
 frontend/yarn-error.log
+.claude/settings.local.json
