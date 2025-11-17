@@ -122,8 +122,8 @@ class LumaDenoiseUsdRender(
             length = end_frame - start_frame + 1
             # Tile based on resolution
             resx, resy, pixel_aspect = self.get_expected_resolution(instance)
-            tile_amntx = int((int(str(resx)))/2)
-            tile_amnty = int((int(str(resy)))/2)
+            tile_amntx = 2
+            tile_amnty = 2
 
             args = r' -a 0'
             args += ' -v'
@@ -329,11 +329,15 @@ class LumaDenoiseUsdRender(
                 pixel_aspect_attributes.append(pixel_aspect_attr)
 
         # Validate resolution and pixel aspect ratio
-        width, height, pixel_aspect = self.get_expected_resolution(instance)
-
-        if width >= 2048 or height >= 2048:
+        # width, height, pixel_aspect = resolution_attributes
+          # Get and print the actual resolution values
+        for res_attr in resolution_attributes:
+            resolution = res_attr.Get(sample_time)
+            self.log.info(f"Resolution: {resolution}")
+        # self.log.debug(f"Width: {width}, Height: {height}")
+        if resolution[0] >= 2048 or resolution[1] >= 2048:
             return True
-        return False
+        # return False
 
     @classmethod
     def get_expected_resolution(self, instance):

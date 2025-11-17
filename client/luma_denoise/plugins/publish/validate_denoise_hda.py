@@ -20,6 +20,19 @@ class ValidateDenoiseHda(plugin.HoudiniInstancePlugin, AYONPyblishPluginMixin):
     order = pyblish.api.ValidatorOrder 
     families = ["usdrender"]
     
+    def find_node_by_name(self,parent_node, name, case_sensitive=False):
+
+        if case_sensitive:
+            return parent_node.node(name)
+        
+        # Case-insensitive search
+        name_lower = name.lower()
+        for child in parent_node.allSubChildren():
+            if child.name().lower() == name_lower:
+                return child
+    
+        return None
+    
     def get_denoise_enabled(self, instance):
         """Get the denoise setting from publish attributes"""
         # The BoolDef "denoise" is defined in HoudiniSubmitDeadlineUsdRender plugin
@@ -40,18 +53,18 @@ class ValidateDenoiseHda(plugin.HoudiniInstancePlugin, AYONPyblishPluginMixin):
 
         # Get denoise setting from publish attributes
         denoise = self.get_denoise_enabled(instance)
-        instancename = instance.data["name"]
+        variantname = instance.data["variant"]
 
         # Get the /stage network first
         stage = hou.node('/stage')
 
         # Then get the node within it
-        node = stage.node(instancename)
+        node = self.find_node_by_name(stage,variantname)
 
         # Set the rmdenoise_aovs parameter on the render node
-        node.parm("rmdenoise_aovs").set(bool(denoise))
+        node.parm("rmdenoise_aovs").set(bool(denoise))  
 
-        self.log.info(f"Setting rmdenoise_aovs on {instancename} to {denoise}")
+        self.log.info(f"Setting denoise on {variantname} to {denoise}")
                 
                 
 
