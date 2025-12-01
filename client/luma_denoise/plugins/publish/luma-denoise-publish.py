@@ -139,7 +139,7 @@ class LumaDenoiseUsdRender(
             if self.detectlargeimage(instance):
                 self.log.info("Large image detected, enabling tiled denoising.")
                 args += ' --tiles {} {} '.format(str(tile_amntx),str(tile_amnty))
-            args += r' -o ' + os.path.join(dirname, 'denoised')
+            args += r' -o ' + os.path.join(dirname, 'denoised').replace("\\", "/")
             args += ' ' + os.path.join(dirname, basename).replace("\\", "/")
             args += ' ' + str(instance.data.get("frameStartHandle", 1)) + '-' + str(instance.data.get("frameEndHandle", 1))
 
@@ -148,7 +148,7 @@ class LumaDenoiseUsdRender(
             plugin_info = CommandLinePluginInfo(
                 Executable=executable_path,
                 Arguments=args,
-                StartupDirectory=dirname,
+                # StartupDirectory=dirname.replace("\\", "/"),
                 SingleFramesOnly=False,
                 ShellExecute=False,
                 Shell="cmd"  # Each frame is processed independently
