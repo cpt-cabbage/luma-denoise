@@ -54,12 +54,13 @@ class ValidateDenoiseHda(plugin.HoudiniInstancePlugin, AYONPyblishPluginMixin):
         # Get denoise setting from publish attributes
         denoise = self.get_denoise_enabled(instance)
         variantname = instance.data["variant"]
-
+        self.log.info(f"Variant name: {variantname}")
         # Get the /stage network first
         stage = hou.node('/stage')
 
         # Then get the node within it
         node = self.find_node_by_name(stage,variantname)
+        self.log.info(node)
 
         # Set the rmdenoise_aovs parameter on the render node
         node.parm("rmdenoise_aovs").set(bool(denoise))  
