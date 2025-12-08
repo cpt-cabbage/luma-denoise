@@ -199,10 +199,8 @@ class LumaDenoiseUsdRender(
                 instance.data["denoise"] = self.get_denoise_enabled(instance)
 
             denoise_enabled = instance.data["denoise"]
-            self.log.info(f"Denoise enabled for instance: {denoise_enabled}")
 
             if not denoise_enabled:
-                self.log.info("Denoising disabled for this instance, skipping.")
                 return
 
             # Ensure we have files to denoise
