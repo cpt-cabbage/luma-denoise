@@ -113,17 +113,4 @@ class StartshotTools(LauncherAction):
 
         # Normalize
         valid_workdir = os.path.normpath(valid_workdir)
-        if os.path.exists(valid_workdir):
-            return valid_workdir
-
-        data.pop("task", None)
-        workdir = anatomy.get_template_item(
-            "work", "default", "folder"
-        ).format(data)
-        valid_workdir = self._find_first_filled_path(workdir)
-        if valid_workdir:
-            # Normalize
-            valid_workdir = os.path.normpath(valid_workdir)
-            if os.path.exists(valid_workdir):
-                return valid_workdir
-        raise AssertionError("Folder does not exist yet.")
+        return valid_workdir
