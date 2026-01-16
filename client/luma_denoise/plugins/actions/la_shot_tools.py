@@ -113,4 +113,6 @@ class StartshotTools(LauncherAction):
 
         # Normalize
         valid_workdir = os.path.normpath(valid_workdir)
+        if not os.path.exists(valid_workdir):
+            os.makedirs(valid_workdir)
         return valid_workdir
