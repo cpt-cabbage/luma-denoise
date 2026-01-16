@@ -18,25 +18,26 @@ from ayon_core.pipeline.template_data import get_template_data
 class StartshotTools(LauncherAction):
     name = "la_shot_tools"
     label = "Luma Tools"
-    icon = r"L:\tools\_studio_tools\luma_tools\resources\Icon_white_small.png"
+    icon = r"resources\Icon_white_small.png"
     order = 500
 
 
 
     def runscript(self,project,asset,task,path,user,output_subdirectory):
-        subprocess.Popen(r"L:\tools\_studio_tools\luma_tools\luma_tools.bat {} {} {} {} {} {}".format(project,asset,task,path,user,output_subdirectory))
+        subprocess.Popen(r"L:\tools\_studio_tools\AYON\_dev\christophe\la_shot_tools\luma_tools\luma_tools.bat {} {} {} {} {} {}".format(project,asset,task,path,user,output_subdirectory))
 
 
 
 
 
     def is_compatible(self, selection):
-
-        compatible = False
-        if selection.is_task_selected:
-            if selection.get_task_name() in ["compositing","lookdev","fx"]:
-                compatible = True
-        return compatible
+        # Only show on shot folders
+        folder_path = getattr(selection, "_folder_path", None)
+        if folder_path:
+            folder_name = folder_path.rsplit("/", 1)[-1]
+            if not folder_name.startswith("sh"):
+                return False
+        return True
 
 
     def process(self, selection, **kwargs):
@@ -52,6 +53,7 @@ class StartshotTools(LauncherAction):
         print("Shot path: " + str(shotpath))
         parts = shotpath.split(os.sep)
         print("parts: "+ str(parts))
+        shot = None
         try:
             shots_index = parts.index('shots')
             for part in parts:
@@ -60,7 +62,7 @@ class StartshotTools(LauncherAction):
                     shot = part
         except (ValueError, IndexError):
             pass
-        print("Shot: " + shot )
+        print("Shot: " + str(shot))
         if not shotpath:
             return
         self.runscript(project_name,shot,task_name,shotpath,user,output_subdirectory)
