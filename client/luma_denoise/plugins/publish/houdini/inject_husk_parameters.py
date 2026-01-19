@@ -72,6 +72,8 @@ class InjectHuskParameters(pyblish.api.InstancePlugin, AYONPyblishPluginMixin):
         if autocrop:
             self.log.info("Autocrop enabled")
             params["Autocrop"] = "C,A,a,holdout_shadows,beauty,AO"
+        else:
+            params["Autocrop"] = "*"
 
         # Legacy EXR
         legacyexr = instance.data.get("legacyexr", False)

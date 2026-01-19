@@ -23,8 +23,31 @@ class StartshotTools(LauncherAction):
 
 
 
-    def runscript(self,project,asset,task,path,user,output_subdirectory):
-        subprocess.Popen(r"L:\tools\_studio_tools\AYON\_dev\christophe\la_shot_tools\luma_tools\luma_tools.bat {} {} {} {} {} {}".format(project,asset,task,path,user,output_subdirectory))
+    def runscript(self, project, asset, task, path, user, output_subdirectory):
+        # Ensure all arguments are strings (convert None to empty string)
+        args = [str(arg) if arg is not None else "" for arg in [project, asset, task, path, user, output_subdirectory]]
+        settings_variant = ayon_api.get_default_settings_variant()
+
+        if os.name == 'nt':  # Windows
+            base_path = r"L:\tools\_studio_tools\AYON\_dev\christophe\la_shot_tools\luma_tools"
+            python_path = os.path.join(base_path, "python", "venv", "Scripts", "python.exe")
+            script_path = os.path.join(base_path, "python", "core", "luma_tools.py")
+            env = os.environ.copy()
+            env["PYTHONPATH"] = os.path.join(base_path, "python") + ";" + os.path.join(base_path, "resources", "ui") + ";" + env.get("PYTHONPATH", "")
+            env["AYON_DEFAULT_SETTINGS_VARIANT"] = settings_variant
+            # Use cmd /k to keep window open after script exits, CREATE_NEW_CONSOLE to show window
+            args_str = " ".join('"{}"'.format(a) for a in args)
+            # Debug: echo the arguments before running
+            cmd = 'cmd /k echo Args: {} && "{}" "{}" {}'.format(args_str, python_path, script_path, args_str)
+            subprocess.Popen(cmd, env=env, cwd=base_path, creationflags=subprocess.CREATE_NEW_CONSOLE)
+        else:  # macOS / Linux
+            base_path = "/Volumes/libraries/_studio_tools/luma_tools"
+            python_path = os.path.join(base_path, "python", "venv", "bin", "python")
+            script_path = os.path.join(base_path, "python", "core", "luma_tools.py")
+            env = os.environ.copy()
+            env["PYTHONPATH"] = os.path.join(base_path, "python") + ":" + os.path.join(base_path, "resources", "ui") + ":" + env.get("PYTHONPATH", "")
+            env["AYON_DEFAULT_SETTINGS_VARIANT"] = settings_variant
+            subprocess.Popen([python_path, script_path] + args, env=env, cwd=base_path)
 
 
 
@@ -46,7 +69,7 @@ class StartshotTools(LauncherAction):
         addonssettings = ayon_api.get_addons_project_settings(project_name)
         output_subdirectory = addonssettings.get("output_subdirectory", "combined")
         task_name = selection.get_task_name()
-        user = os.environ["USERNAME"]
+        user = os.environ.get("USER") or os.environ.get("USERNAME")
         shotpath = self._get_workdir(selection)
         # Get path up to and including 'work'
         shotpath = shotpath.partition('work')[0] + 'work'
