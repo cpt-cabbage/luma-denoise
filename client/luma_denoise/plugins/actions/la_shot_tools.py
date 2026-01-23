@@ -150,6 +150,13 @@ class StartshotTools(LauncherAction):
         print(f"Luma Tools: Running in {mode_str} mode (Ctrl+click to change)")
 
         project_name = selection.project_name
+        if not project_name:
+            QtWidgets.QMessageBox.warning(
+                None,
+                "Luma Tools",
+                "No project selected. Please select a project first."
+            )
+            return
         addonssettings = ayon_api.get_addons_project_settings(project_name)
         output_subdirectory = addonssettings.get("output_subdirectory", "combined")
         task_name = selection.get_task_name()
