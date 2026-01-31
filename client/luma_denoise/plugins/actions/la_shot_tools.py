@@ -145,6 +145,9 @@ class StartshotTools(LauncherAction):
             show_settings_dialog()
             return  # Don't run, just change settings
 
+        # Re-read dev mode from config file each time
+        _dev_mode_enabled = load_dev_mode()
+
         # Normal click runs with current mode
         mode_str = "DEV" if _dev_mode_enabled else "PRODUCTION"
         print(f"Luma Tools: Running in {mode_str} mode (Ctrl+click to change)")
