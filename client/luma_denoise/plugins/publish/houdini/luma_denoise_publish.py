@@ -120,6 +120,21 @@ class LumaDenoiseUsdRender(
             start_frame = instance.data.get("frameStartHandle", 1)
             end_frame = instance.data.get("frameEndHandle", 1)
             length = end_frame - start_frame + 1
+
+            # If custom frames are set in the publish window,
+            # use those to determine frame count instead
+            publish_attrs = instance.data.get("publish_attributes", {})
+            jobinfo_attrs = publish_attrs.get("CollectJobInfo", {})
+            use_custom = jobinfo_attrs.get("use_custom_frames", "none")
+            if use_custom in ("custom_only", "reuse_last_version"):
+                custom_frames_str = jobinfo_attrs.get("frames", "")
+                if custom_frames_str:
+                    length = self._count_custom_frames(custom_frames_str)
+                    self.log.debug(
+                        f"Using custom frames count: {length} "
+                        f"(from '{custom_frames_str}')"
+                    )
+
             # Tile based on resolution
             resx, resy, pixel_aspect = self.get_expected_resolution(instance)
             tile_amntx = 2
@@ -287,6 +302,25 @@ class LumaDenoiseUsdRender(
             self.log.error(traceback.format_exc())
             raise
     
+    @staticmethod
+    def _count_custom_frames(frames_str):
+        """Count individual frames from a custom frames string.
+
+        Supports formats like "1001,1003-1006,1010" and returns the
+        total number of frames represented.
+        """
+        count = 0
+        for part in frames_str.replace(" ", "").split(","):
+            if "-" in part:
+                tokens = part.split("-", 1)
+                try:
+                    count += int(tokens[1]) - int(tokens[0]) + 1
+                except (ValueError, IndexError):
+                    count += 1
+            elif part:
+                count += 1
+        return max(count, 1)
+
     @classmethod
     def detectlargeimage(self,instance):
         # Import Houdini modules only when this method is called

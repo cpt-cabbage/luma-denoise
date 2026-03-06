@@ -80,11 +80,19 @@ class ExtractOiioCombine(
         if dependency_job_ids:
             job_info.JobDependencies = dependency_job_ids
 
-        # Set frames to match the render frames
-        start_frame = instance.data.get("frameStartHandle", 1)
-        end_frame = instance.data.get("frameEndHandle", 1)
-        step = instance.data.get("byFrameStep", 1)
-        job_info.Frames = f"{int(start_frame)}-{int(end_frame)}x{int(step)}"
+        # Set frames to match the render frames, respecting custom frames
+        publish_attrs = instance.data.get("publish_attributes", {})
+        jobinfo_attrs = publish_attrs.get("CollectJobInfo", {})
+        use_custom = jobinfo_attrs.get("use_custom_frames", "none")
+        custom_frames_str = jobinfo_attrs.get("frames", "")
+
+        if use_custom in ("custom_only", "reuse_last_version") and custom_frames_str:
+            job_info.Frames = custom_frames_str
+        else:
+            start_frame = instance.data.get("frameStartHandle", 1)
+            end_frame = instance.data.get("frameEndHandle", 1)
+            step = instance.data.get("byFrameStep", 1)
+            job_info.Frames = f"{int(start_frame)}-{int(end_frame)}x{int(step)}"
 
         # Set output directories for combined results
         output_subdirectory = oiio_settings.get("output_subdirectory", "combined")

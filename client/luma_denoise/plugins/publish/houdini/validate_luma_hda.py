@@ -64,6 +64,22 @@ class ValidateLumaHda(plugin.HoudiniInstancePlugin, AYONPyblishPluginMixin):
         # Default to CPU
         return "cpu"
 
+    def _find_hda_node(self, instance):
+        """Find the HDA node that carries Luma parameters.
+
+        Walks up the parent hierarchy from the ROP node looking for
+        a node with the legacyexr parm (the Luma Render HDA).
+        """
+        node_path = instance.data.get("instance_node")
+        if node_path:
+            node = hou.node(node_path)
+            while node:
+                if node.parm("legacyexr"):
+                    return node
+                node = node.parent()
+
+        return None
+
     def process(self, instance):
         context = instance.context
 
@@ -72,16 +88,13 @@ class ValidateLumaHda(plugin.HoudiniInstancePlugin, AYONPyblishPluginMixin):
             result["success"] for result in context.data["results"]
         ), "Errors found, aborting integration.."
 
-        variantname = instance.data["variant"]
-        self.log.info(f"Variant name: {variantname}")
-
-        # Get the /stage network first
-        stage = hou.node('/stage')
-
-        # Find the node within it
-        node = self.find_node_by_name(stage, variantname)
+        node = self._find_hda_node(instance)
         if not node:
-            self.log.warning(f"Could not find node '{variantname}' in /stage")
+            self.log.warning(
+                f"Could not find Luma HDA node for instance "
+                f"'{instance.data.get('instance_node', '?')}' "
+                f"(variant: '{instance.data.get('variant', '?')}')"
+            )
             return
 
         self.log.info(f"Found node: {node.path()}")
