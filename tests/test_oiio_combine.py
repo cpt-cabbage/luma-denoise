@@ -23,6 +23,7 @@ def test_parse_args_minimal_surface():
     assert args.output == "/a/out.exr"
     assert args.oiiotool == "/bin/oiiotool"
     assert args.exclude == []
+    assert args.num_default_excludes == 0
     assert args.rename == []
     assert args.extra_args == ""
     assert args.compression == ""

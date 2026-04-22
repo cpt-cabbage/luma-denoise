@@ -44,6 +44,11 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
                         metavar="PATTERN",
                         help="fnmatch glob pattern. Raw channels matching are "
                              "excluded. May be given multiple times.")
+    parser.add_argument("--num-default-excludes", type=int, default=0,
+                        metavar="N",
+                        help="How many of the leading --exclude values came "
+                             "from built-in defaults (vs user settings). "
+                             "Used only for manifest labeling.")
     parser.add_argument("--rename", action="append", default=[],
                         metavar="SRC=DST",
                         help="Beauty channel rename pair 'source=target'. "
@@ -92,6 +97,11 @@ _FRAME_RE = re.compile(r"\.(\d{3,})(?=\.[A-Za-z0-9]+$)")
 
 def _parse_oiiotool_info_channels(stdout: str) -> list[str]:
     """Extract the channel name list from `oiiotool --info -v` stdout.
+
+    Returns only the FIRST subimage's channel list (via re.search). Production
+    EXRs from RenderMan denoise_batch are always single-subimage, so this is
+    not a bug; documented here to prevent a future reader from accidentally
+    "fixing" it to concatenate all subimages.
 
     Args:
         stdout: The stdout captured from invoking `oiiotool --info -v <file>`.
@@ -266,7 +276,9 @@ def build_oiiotool_argv(
         argv.append(data_type)
 
     if extra_args:
-        argv.extend(shlex.split(extra_args))
+        # posix=False on Windows so backslashes in paths aren't treated as escapes
+        # (e.g. --colorconfig C:\tools\ocio\config.ocio).
+        argv.extend(shlex.split(extra_args, posix=(sys.platform != "win32")))
 
     argv.extend(["-o", output])
     return argv
@@ -333,6 +345,15 @@ def write_manifest(output_path: str, manifest: dict) -> bool:
 def main(argv: Sequence[str] | None = None) -> int:
     args = parse_args(argv)
 
+    try:
+        return _run(args)
+    except (RuntimeError, ValueError) as exc:
+        # Deadline worker logs this line with a clear prefix; skip the traceback.
+        print(f"[oiio_combine] ERROR: {exc}", file=sys.stderr)
+        return 1
+
+
+def _run(args: argparse.Namespace) -> int:
     pass_through = (args.denoised == args.raw)
 
     if args.verbose:
@@ -352,11 +373,12 @@ def main(argv: Sequence[str] | None = None) -> int:
             print(f"[oiio_combine] raw_channels ({len(raw_channels)}): {raw_channels}")
 
     # Compute exclusions + extras.
-    # The plugin submits default exclude patterns first, then user-configured
-    # ones. We split informationally for the manifest: first 3 are defaults.
+    # The plugin passes default exclude patterns first, then user patterns.
+    # --num-default-excludes N tells us where the split is (manifest only).
     all_excludes = list(args.exclude)
-    exclude_patterns_default = all_excludes[:3] if len(all_excludes) >= 3 else all_excludes
-    exclude_patterns_user = all_excludes[3:] if len(all_excludes) > 3 else []
+    split_point = min(max(0, args.num_default_excludes), len(all_excludes))
+    exclude_patterns_default = all_excludes[:split_point]
+    exclude_patterns_user = all_excludes[split_point:]
     extra_channels = ([] if pass_through
                       else compute_extra_channels(denoised_channels, raw_channels, all_excludes))
     _, excluded_channels = apply_exclude_patterns(raw_channels, all_excludes)
