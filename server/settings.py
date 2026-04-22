@@ -28,7 +28,7 @@ if TYPE_CHECKING:
 
 
 class ChannelRenamePair(BaseSettingsModel):
-    """A source→target channel rename applied by oiiotool's --chnames."""
+    """A source->target channel rename applied by oiiotool's --chnames."""
     _layout = "compact"
     source: str = SettingsField(
         "",
@@ -138,10 +138,13 @@ class LumaDenoiseSettings(BaseSettingsModel):
         False,
         title="Run OIIO Combine when denoise is disabled",
         description=(
-            "When False, the OIIO combine job is only submitted if denoise "
-            "actually ran. When True, the combine job runs as a pass-through "
-            "over the raw render (useful if downstream tooling needs "
-            "'combined/' as a consistent publish location)."
+            "Only applies when denoise did NOT run for an instance. "
+            "When False (default), the OIIO combine job is skipped entirely "
+            "and publish pulls from the raw render directory. When True, "
+            "the combine job runs as a pass-through over the raw render "
+            "(useful if downstream tooling needs 'combined/' as a consistent "
+            "publish location). When denoise did run, the combine job "
+            "always runs regardless of this flag."
         ),
     )
 
@@ -188,18 +191,19 @@ class LumaDenoiseSettings(BaseSettingsModel):
         "",
         title="Extra oiiotool Args",
         description=(
-            "Raw string inserted verbatim into the oiiotool command between "
-            "--chnames and -o. Useful for --planarconfig, --tile, --iconfig, "
-            "etc."
+            "Raw string inserted verbatim into the oiiotool command after "
+            "--compression and before -o. Useful for --planarconfig, "
+            "--tile, --iconfig, etc."
         ),
     )
 
     output_compression: str = SettingsField(
-        "zips:16",
+        "zips",
         title="Output Compression",
         description=(
             "Passed to oiiotool as --compression <val>. Empty string disables "
-            "the flag."
+            "the flag. Common values: 'zips' (fast, default), 'zip' (slower, "
+            "slightly smaller), 'piz' (smaller for natural images, slower)."
         ),
     )
 
