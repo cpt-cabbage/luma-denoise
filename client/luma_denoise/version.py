@@ -1,3 +1,3 @@
 # -*- coding: utf-8 -*-
 """Package declaring luma-denoise addon version."""
-__version__ = "0.0.8"
+__version__ = "0.1.0"
