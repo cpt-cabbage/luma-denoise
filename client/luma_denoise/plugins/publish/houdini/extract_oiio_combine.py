@@ -247,3 +247,83 @@ class ExtractOiioCombine(
             "scripts", "oiio_combine.py",
         )
         return [script_path.replace("\\", "/")]
+
+    def process(self, instance):
+        self._instance = instance
+
+        try:
+            project_settings = instance.context.data["project_settings"]
+            oiio_settings = project_settings.get("luma-denoise", {})
+
+            if not oiio_settings.get("oiio_enabled", True):
+                self.log.info("OIIO combine disabled in project settings, skipping.")
+                return
+
+            if not instance.data.get("files"):
+                self.log.warning("No files found for OIIO combine.")
+                return
+
+            denoise_job_id = instance.data.get("denoise_job_id")
+            run_when_no_denoise = oiio_settings.get("run_when_denoise_disabled", False)
+
+            if denoise_job_id:
+                dependency_job_id = denoise_job_id
+                self.log.info(
+                    f"OIIO combine depends on denoise job: {denoise_job_id}")
+            else:
+                if not run_when_no_denoise:
+                    self.log.info(
+                        "Denoise did not run and run_when_denoise_disabled is False — "
+                        "skipping OIIO combine.")
+                    return
+
+                render_job_id = None
+                if "deadlineSubmissionJob" in instance.data:
+                    submission_job = instance.data["deadlineSubmissionJob"]
+                    if isinstance(submission_job, dict) and "_id" in submission_job:
+                        render_job_id = submission_job["_id"]
+                    elif hasattr(submission_job, '_id'):
+                        render_job_id = submission_job._id
+
+                if not render_job_id:
+                    self.log.warning(
+                        "No denoise or render job ID found. Skipping OIIO combine.")
+                    return
+
+                dependency_job_id = render_job_id
+                self.log.info(
+                    f"OIIO combine depends on render job: {render_job_id} "
+                    "(pass-through, no denoise)")
+
+            self._deadline_url = instance.data["deadline"]["url"]
+            assert self._deadline_url, "Requires Deadline Webservice URL"
+
+            job_info = self.get_generic_job_info(instance)
+            self.job_info = self.get_job_info(
+                job_info=deepcopy(job_info),
+                dependency_job_ids=[dependency_job_id])
+
+            self.plugin_info = self.get_plugin_info()
+            self.aux_files = self.get_aux_files()
+
+            plugin_info_data = instance.data["deadline"]["plugin_info_data"]
+            if plugin_info_data:
+                self.apply_additional_plugin_info(plugin_info_data)
+
+            job_id = self.process_submission()
+            self.log.info(
+                f"Submitted OIIO combine job to Deadline: {job_id} "
+                f"(depends on {dependency_job_id})")
+
+            instance.data["oiio_combine_job_id"] = job_id
+
+            output_dir = os.path.dirname(instance.data["files"][0])
+            instance.data["outputDir"] = output_dir
+            instance.data["toBeRenderedOn"] = "deadline"
+            instance.data["stagingDir"] = oiio_settings.get("output_subdirectory", "combined")
+
+            instance.data["deadline"]["job_info"] = deepcopy(self.job_info)
+
+        except Exception as e:
+            self.log.error(f"Failed to process OIIO combine plugin: {str(e)}")
+            raise
