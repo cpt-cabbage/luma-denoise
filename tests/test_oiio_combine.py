@@ -414,3 +414,112 @@ def test_derive_frame_from_path():
     assert oiio_combine._derive_frame_from_path("/a/shot.0042.exr") == 42
     assert oiio_combine._derive_frame_from_path("/a/shot_name.exr") is None
     assert oiio_combine._derive_frame_from_path("/a/shot.v044.exr") is None
+
+
+def test_main_end_to_end_mocked(monkeypatch, tmp_path):
+    """main() orchestrates reading channels, building argv, running oiiotool, and exiting with its rc."""
+    denoised = tmp_path / "denoised" / "shot.1001.exr"
+    raw = tmp_path / "shot.1001.exr"
+    output = tmp_path / "combined" / "shot.1001.exr"
+    denoised.parent.mkdir(parents=True)
+    raw.parent.mkdir(parents=True, exist_ok=True)
+    output.parent.mkdir(parents=True)
+    denoised.write_bytes(b"")
+    raw.write_bytes(b"")
+
+    recorded = {}
+
+    def fake_read_channels(path, oiiotool_path):
+        if "denoised" in path:
+            return ["Ci.r", "Ci.g", "Ci.b", "a.Z", "diffuse.r"]
+        return ["Ci.r", "Ci.g", "Ci.b", "a.Z", "diffuse.r",
+                "CryptoMaterials00.R", "normal.x", "mse.r"]
+
+    def fake_run(argv, **kwargs):
+        recorded["argv"] = argv
+        class R:
+            returncode = 0
+            stdout = "ok"
+            stderr = ""
+        return R()
+
+    monkeypatch.setattr(oiio_combine, "read_channels", fake_read_channels)
+    monkeypatch.setattr(oiio_combine.subprocess, "run", fake_run)
+
+    rc = oiio_combine.main([
+        "--denoised", str(denoised),
+        "--raw", str(raw),
+        "--output", str(output),
+        "--oiiotool", "/bin/oiiotool",
+        "--exclude", "*_mse",
+        "--exclude", "mse",
+        "--exclude", "sampleCount",
+        "--rename", "Ci.r=R",
+        "--rename", "Ci.g=G",
+        "--rename", "Ci.b=B",
+        "--rename", "a.Z=A",
+        "--compression", "zips",
+        "--write-manifest",
+        "--verbose",
+    ])
+
+    assert rc == 0
+    argv = recorded["argv"]
+    assert argv[0] == "/bin/oiiotool"
+    assert argv[-2:] == ["-o", str(output)]
+    ch_idx = argv.index("--ch")
+    extras = argv[ch_idx + 1].split(",")
+    assert "CryptoMaterials00.R" in extras
+    assert "normal.x" in extras
+    assert "mse.r" not in extras
+    sidecar = tmp_path / "combined" / "shot.1001.exr.combine.json"
+    assert sidecar.exists()
+    import json
+    manifest = json.loads(sidecar.read_text())
+    assert manifest["frame"] == 1001
+    assert manifest["exit_code"] == 0
+    assert manifest["pass_through"] is False
+
+
+def test_main_pass_through_when_denoised_equals_raw(monkeypatch, tmp_path):
+    raw = tmp_path / "shot.1001.exr"
+    output = tmp_path / "combined" / "shot.1001.exr"
+    output.parent.mkdir(parents=True)
+    raw.write_bytes(b"")
+
+    def fake_read_channels(path, oiiotool_path):
+        return ["beauty.r", "beauty.g", "beauty.b", "a.Z", "normal.x"]
+
+    recorded = {}
+    def fake_run(argv, **kwargs):
+        recorded["argv"] = argv
+        class R:
+            returncode = 0
+            stdout = ""
+            stderr = ""
+        return R()
+
+    monkeypatch.setattr(oiio_combine, "read_channels", fake_read_channels)
+    monkeypatch.setattr(oiio_combine.subprocess, "run", fake_run)
+
+    rc = oiio_combine.main([
+        "--denoised", str(raw),
+        "--raw", str(raw),
+        "--output", str(output),
+        "--oiiotool", "/bin/oiiotool",
+        "--rename", "beauty.r=R",
+        "--rename", "beauty.g=G",
+        "--rename", "beauty.b=B",
+        "--rename", "a.Z=A",
+        "--write-manifest",
+    ])
+    assert rc == 0
+    argv = recorded["argv"]
+    assert "--ch" not in argv
+    assert "--chappend" not in argv
+    assert "--chnames" in argv
+
+    sidecar = output.with_suffix(output.suffix + ".combine.json")
+    import json
+    m = json.loads(sidecar.read_text())
+    assert m["pass_through"] is True

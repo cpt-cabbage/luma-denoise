@@ -332,8 +332,97 @@ def write_manifest(output_path: str, manifest: dict) -> bool:
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = parse_args(argv)
-    # Subsequent tasks will fill in the orchestration body.
-    raise NotImplementedError("main not implemented yet")
+
+    pass_through = (args.denoised == args.raw)
+
+    if args.verbose:
+        print(f"[oiio_combine] denoised={args.denoised}")
+        print(f"[oiio_combine] raw={args.raw}")
+        print(f"[oiio_combine] output={args.output}")
+        print(f"[oiio_combine] pass_through={pass_through}")
+
+    # Read channel lists (runtime introspection).
+    denoised_channels = read_channels(args.denoised, args.oiiotool)
+    raw_channels = (denoised_channels if pass_through
+                    else read_channels(args.raw, args.oiiotool))
+
+    if args.verbose:
+        print(f"[oiio_combine] denoised_channels ({len(denoised_channels)}): {denoised_channels}")
+        if not pass_through:
+            print(f"[oiio_combine] raw_channels ({len(raw_channels)}): {raw_channels}")
+
+    # Compute exclusions + extras.
+    # The plugin submits default exclude patterns first, then user-configured
+    # ones. We split informationally for the manifest: first 3 are defaults.
+    all_excludes = list(args.exclude)
+    exclude_patterns_default = all_excludes[:3] if len(all_excludes) >= 3 else all_excludes
+    exclude_patterns_user = all_excludes[3:] if len(all_excludes) > 3 else []
+    extra_channels = ([] if pass_through
+                      else compute_extra_channels(denoised_channels, raw_channels, all_excludes))
+    _, excluded_channels = apply_exclude_patterns(raw_channels, all_excludes)
+
+    if args.verbose:
+        print(f"[oiio_combine] excluded ({len(excluded_channels)}): {excluded_channels}")
+        print(f"[oiio_combine] extras   ({len(extra_channels)}): {extra_channels}")
+
+    # Resolve rename map.
+    rename_map = parse_rename_pairs(args.rename)
+    final_channels = list(denoised_channels) + list(extra_channels)
+    chnames_override = resolve_chnames(final_channels, rename_map)
+    if chnames_override is None and rename_map:
+        print(f"[oiio_combine] WARN: no channels matched rename map; skipping --chnames",
+              file=sys.stderr)
+
+    chnames_applied: dict[str, str] = {}
+    if chnames_override is not None:
+        for src, dst in rename_map.items():
+            if src in final_channels:
+                chnames_applied[src] = dst
+
+    # Build argv.
+    argv_oiiotool = build_oiiotool_argv(
+        oiiotool=args.oiiotool,
+        denoised=args.denoised,
+        raw=args.raw,
+        output=args.output,
+        extra_channels=extra_channels,
+        chnames_override=chnames_override,
+        compression=args.compression,
+        data_type=args.data_type,
+        extra_args=args.extra_args,
+        pass_through=pass_through,
+    )
+
+    if args.verbose:
+        print(f"[oiio_combine] running: {' '.join(argv_oiiotool)}")
+
+    # Run.
+    result = subprocess.run(argv_oiiotool, capture_output=True, text=True, check=False)
+    if result.stdout:
+        print(result.stdout)
+    if result.stderr:
+        print(result.stderr, file=sys.stderr)
+
+    # Manifest.
+    if args.write_manifest:
+        manifest = build_manifest(
+            denoised_path=args.denoised,
+            raw_path=args.raw,
+            output_path=args.output,
+            pass_through=pass_through,
+            denoised_channels=denoised_channels,
+            raw_channels=raw_channels,
+            exclude_patterns_user=exclude_patterns_user,
+            exclude_patterns_default=exclude_patterns_default,
+            excluded_channels=excluded_channels,
+            appended_channels=extra_channels,
+            chnames_applied=chnames_applied,
+            oiiotool_argv=argv_oiiotool,
+            exit_code=result.returncode,
+        )
+        write_manifest(args.output, manifest)
+
+    return result.returncode
 
 
 if __name__ == "__main__":
