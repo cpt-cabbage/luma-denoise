@@ -233,3 +233,126 @@ def test_resolve_chnames_returns_none_when_no_matches():
     final_channels = ["foo", "bar"]
     rename_map = {"Ci.r": "R"}
     assert oiio_combine.resolve_chnames(final_channels, rename_map) is None
+
+
+def test_build_oiiotool_argv_normal_path():
+    argv = oiio_combine.build_oiiotool_argv(
+        oiiotool="/bin/oiiotool",
+        denoised="/a/d.exr",
+        raw="/a/r.exr",
+        output="/a/o.exr",
+        extra_channels=["CryptoMaterials00.R", "normal.x"],
+        chnames_override=["R", "G", "B", "A", "diffuse.r"],
+        compression="zips",
+        data_type="preserve",
+        extra_args="",
+        pass_through=False,
+    )
+    assert argv[0] == "/bin/oiiotool"
+    assert argv[1] == "/a/d.exr"
+    assert argv[2] == "/a/r.exr"
+    assert "--ch" in argv
+    ch_idx = argv.index("--ch")
+    assert argv[ch_idx + 1] == "CryptoMaterials00.R,normal.x"
+    assert "--chappend" in argv
+    assert "--chnames" in argv
+    chn_idx = argv.index("--chnames")
+    assert argv[chn_idx + 1] == "R,G,B,A,diffuse.r"
+    assert "--compression" in argv
+    assert argv[argv.index("--compression") + 1] == "zips"
+    assert argv[-2] == "-o"
+    assert argv[-1] == "/a/o.exr"
+    assert "--format" not in argv
+
+
+def test_build_oiiotool_argv_pass_through_skips_raw_and_chappend():
+    argv = oiio_combine.build_oiiotool_argv(
+        oiiotool="/bin/oiiotool",
+        denoised="/a/r.exr",
+        raw="/a/r.exr",
+        output="/a/o.exr",
+        extra_channels=[],
+        chnames_override=["R", "G", "B", "A"],
+        compression="zips",
+        data_type="preserve",
+        extra_args="",
+        pass_through=True,
+    )
+    assert argv.count("/a/r.exr") == 1
+    assert "--ch" not in argv
+    assert "--chappend" not in argv
+    assert "--chnames" in argv
+    assert argv[-2:] == ["-o", "/a/o.exr"]
+
+
+def test_build_oiiotool_argv_no_chnames_when_override_none():
+    argv = oiio_combine.build_oiiotool_argv(
+        oiiotool="/bin/oiiotool",
+        denoised="/a/d.exr",
+        raw="/a/r.exr",
+        output="/a/o.exr",
+        extra_channels=["normal.x"],
+        chnames_override=None,
+        compression="",
+        data_type="preserve",
+        extra_args="",
+        pass_through=False,
+    )
+    assert "--chnames" not in argv
+    assert "--compression" not in argv
+
+
+def test_build_oiiotool_argv_data_type_float_adds_format():
+    argv = oiio_combine.build_oiiotool_argv(
+        oiiotool="/bin/oiiotool",
+        denoised="/a/d.exr",
+        raw="/a/r.exr",
+        output="/a/o.exr",
+        extra_channels=["normal.x"],
+        chnames_override=None,
+        compression="",
+        data_type="float",
+        extra_args="",
+        pass_through=False,
+    )
+    assert "--format" in argv
+    assert argv[argv.index("--format") + 1] == "float"
+
+
+def test_build_oiiotool_argv_extra_args_inserted_between_chnames_and_output():
+    argv = oiio_combine.build_oiiotool_argv(
+        oiiotool="/bin/oiiotool",
+        denoised="/a/d.exr",
+        raw="/a/r.exr",
+        output="/a/o.exr",
+        extra_channels=["normal.x"],
+        chnames_override=["R", "G", "B", "A"],
+        compression="",
+        data_type="preserve",
+        extra_args="--planarconfig separate",
+        pass_through=False,
+    )
+    planar_idx = argv.index("--planarconfig")
+    chn_idx = argv.index("--chnames")
+    o_idx = argv.index("-o")
+    assert chn_idx < planar_idx < o_idx
+
+
+def test_build_oiiotool_argv_empty_extras_no_ch_flags():
+    argv = oiio_combine.build_oiiotool_argv(
+        oiiotool="/bin/oiiotool",
+        denoised="/a/d.exr",
+        raw="/a/r.exr",
+        output="/a/o.exr",
+        extra_channels=[],
+        chnames_override=["R", "G", "B", "A"],
+        compression="",
+        data_type="preserve",
+        extra_args="",
+        pass_through=False,
+    )
+    # extras empty but not pass-through: raw should NOT appear as input.
+    assert "/a/r.exr" not in argv
+    assert "--ch" not in argv
+    assert "--chappend" not in argv
+    assert "--chnames" in argv

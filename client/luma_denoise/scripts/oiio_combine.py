@@ -18,6 +18,7 @@ from __future__ import annotations
 import argparse
 import fnmatch
 import re
+import shlex
 import subprocess
 import sys
 from typing import Sequence
@@ -215,6 +216,56 @@ def resolve_chnames(
         else:
             out.append(ch)
     return out if matched else None
+
+
+def build_oiiotool_argv(
+    oiiotool: str,
+    denoised: str,
+    raw: str,
+    output: str,
+    extra_channels: list[str],
+    chnames_override: list[str] | None,
+    compression: str,
+    data_type: str,
+    extra_args: str,
+    pass_through: bool,
+) -> list[str]:
+    """Build the oiiotool command-line argv.
+
+    Structure:
+        oiiotool  <denoised>
+                  [<raw> --ch <extras> --chappend]   (skipped if pass_through or empty)
+                  [--chnames <renamed>]              (skipped if override is None)
+                  [--compression <val>]              (skipped if empty)
+                  [--format <type>]                  (skipped if preserve)
+                  [<extra_args split>]
+                  -o <output>
+    """
+    argv: list[str] = [oiiotool, denoised]
+
+    if not pass_through and extra_channels:
+        argv.append(raw)
+        argv.append("--ch")
+        argv.append(",".join(extra_channels))
+        argv.append("--chappend")
+
+    if chnames_override is not None:
+        argv.append("--chnames")
+        argv.append(",".join(chnames_override))
+
+    if compression:
+        argv.append("--compression")
+        argv.append(compression)
+
+    if data_type != "preserve":
+        argv.append("--format")
+        argv.append(data_type)
+
+    if extra_args:
+        argv.extend(shlex.split(extra_args))
+
+    argv.extend(["-o", output])
+    return argv
 
 
 def main(argv: Sequence[str] | None = None) -> int:
