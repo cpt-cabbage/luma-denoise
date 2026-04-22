@@ -27,6 +27,21 @@ if TYPE_CHECKING:
     from ayon_server.addons import BaseServerAddon
 
 
+class ChannelRenamePair(BaseSettingsModel):
+    """A source→target channel rename applied by oiiotool's --chnames."""
+    _layout = "compact"
+    source: str = SettingsField(
+        "",
+        title="Source channel",
+        description="Exact channel name as it appears in the input EXR (e.g. 'Ci.r').",
+    )
+    target: str = SettingsField(
+        "",
+        title="Target channel",
+        description="Name to rename it to in the output EXR (e.g. 'R').",
+    )
+
+
 class LumaDenoiseSettings(BaseSettingsModel):
     """
     """
@@ -107,6 +122,116 @@ class LumaDenoiseSettings(BaseSettingsModel):
         "default",
         title="OIIO Combine Group",
         description="Deadline group for OIIO combine jobs",
+    )
+
+    # --- Wrapper-script tunables ---
+    python_executable: str = SettingsField(
+        "python",
+        title="Python Executable",
+        description=(
+            "Python used on the Deadline worker to run the combine wrapper "
+            "script. Absolute path or a name resolvable on the worker PATH."
+        ),
+    )
+
+    run_when_denoise_disabled: bool = SettingsField(
+        False,
+        title="Run OIIO Combine when denoise is disabled",
+        description=(
+            "When False, the OIIO combine job is only submitted if denoise "
+            "actually ran. When True, the combine job runs as a pass-through "
+            "over the raw render (useful if downstream tooling needs "
+            "'combined/' as a consistent publish location)."
+        ),
+    )
+
+    channel_exclude_patterns: list[str] = SettingsField(
+        default_factory=lambda: ["*_mse", "mse", "sampleCount"],
+        title="Channel Exclude Patterns",
+        description=(
+            "fnmatch glob patterns. Any raw-render channel whose name matches "
+            "any pattern is excluded from the combined output. Defaults strip "
+            "denoiser-internal variance/guidance channels that have no "
+            "compositing value."
+        ),
+    )
+
+    beauty_rename_map_denoised: list[ChannelRenamePair] = SettingsField(
+        default_factory=lambda: [
+            ChannelRenamePair(source="Ci.r", target="R"),
+            ChannelRenamePair(source="Ci.g", target="G"),
+            ChannelRenamePair(source="Ci.b", target="B"),
+            ChannelRenamePair(source="a.Z", target="A"),
+        ],
+        title="Beauty Rename Map (denoised)",
+        description=(
+            "Rename applied to the output's primary beauty channels when "
+            "denoise ran (RenderMan Ci/a convention → Nuke R/G/B/A)."
+        ),
+    )
+
+    beauty_rename_map_raw: list[ChannelRenamePair] = SettingsField(
+        default_factory=lambda: [
+            ChannelRenamePair(source="beauty.r", target="R"),
+            ChannelRenamePair(source="beauty.g", target="G"),
+            ChannelRenamePair(source="beauty.b", target="B"),
+            ChannelRenamePair(source="a.Z", target="A"),
+        ],
+        title="Beauty Rename Map (raw pass-through)",
+        description=(
+            "Rename applied when denoise did not run and OIIO is running "
+            "in pass-through mode. Uses traditional non-denoised AOV naming."
+        ),
+    )
+
+    oiiotool_extra_args: str = SettingsField(
+        "",
+        title="Extra oiiotool Args",
+        description=(
+            "Raw string inserted verbatim into the oiiotool command between "
+            "--chnames and -o. Useful for --planarconfig, --tile, --iconfig, "
+            "etc."
+        ),
+    )
+
+    output_compression: str = SettingsField(
+        "zips:16",
+        title="Output Compression",
+        description=(
+            "Passed to oiiotool as --compression <val>. Empty string disables "
+            "the flag."
+        ),
+    )
+
+    output_data_type: str = SettingsField(
+        "preserve",
+        title="Output Data Type",
+        description=(
+            "'preserve' keeps oiiotool's default per-channel types (depth "
+            "stays float, beauty stays half — required for Nuke). 'float' "
+            "and 'half' force uniform output precision."
+        ),
+        enum_resolver=lambda: ["preserve", "float", "half"],
+    )
+
+    write_combine_manifest: bool = SettingsField(
+        True,
+        title="Write Per-Frame Combine Manifest",
+        description=(
+            "When True, the wrapper writes a <output>.combine.json sidecar "
+            "per frame recording every channel decision. Useful for "
+            "debugging; disable once the pipeline is stable."
+        ),
+    )
+
+    wrapper_verbose_logging: bool = SettingsField(
+        True,
+        title="Verbose Wrapper Logging",
+        description=(
+            "Toggles the wrapper script's -v flag. When True, channel lists "
+            "and the full oiiotool command are logged to the Deadline task "
+            "log."
+        ),
     )
 
     # AOV configuration options
