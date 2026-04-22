@@ -93,3 +93,75 @@ def test_read_channels_oiio_raises_on_open_failure():
         assert "/a/missing.exr" in str(e)
     else:
         raise AssertionError("expected RuntimeError")
+
+
+# Representative oiiotool --info -v output snippet (one real production frame,
+# trimmed to the "channel list:" section).
+SAMPLE_INFO_STDOUT = (
+    "Reading /a/file.exr\n"
+    "/a/file.exr :  705 x  307, 4 channel, half/half/half/half openexr\n"
+    "    channel list: Ci.r (half), Ci.g (half), Ci.b (half), a.Z (half)\n"
+    "    pixel data origin: x=1272, y=490\n"
+    "    compression: \"zips\"\n"
+)
+
+
+def test_parse_oiiotool_info_channels():
+    channels = oiio_combine._parse_oiiotool_info_channels(SAMPLE_INFO_STDOUT)
+    assert channels == ["Ci.r", "Ci.g", "Ci.b", "a.Z"]
+
+
+def test_parse_oiiotool_info_channels_with_spaces_and_types():
+    stdout = (
+        "    channel list: R (half), G (half), B (half), A (float), "
+        "CryptoMaterials.R (float), CryptoMaterials00.R (float)\n"
+    )
+    channels = oiio_combine._parse_oiiotool_info_channels(stdout)
+    assert channels == ["R", "G", "B", "A", "CryptoMaterials.R", "CryptoMaterials00.R"]
+
+
+def test_parse_oiiotool_info_channels_missing_raises():
+    stdout = "Reading foo.exr\n    compression: \"zips\"\n"
+    try:
+        oiio_combine._parse_oiiotool_info_channels(stdout)
+    except RuntimeError as e:
+        assert "channel list" in str(e).lower()
+    else:
+        raise AssertionError("expected RuntimeError")
+
+
+def test_read_channels_dispatch_prefers_oiio(monkeypatch):
+    """read_channels should use OIIO Python when available."""
+    calls = []
+
+    def fake_oiio_reader(path, oiio_mod):
+        calls.append(("oiio", path))
+        return ["Ci.r", "Ci.g"]
+
+    def fake_subprocess_reader(path, oiiotool_path):
+        calls.append(("subprocess", path))
+        return ["SHOULD_NOT_HAPPEN"]
+
+    monkeypatch.setattr(oiio_combine, "_read_channels_oiio", fake_oiio_reader)
+    monkeypatch.setattr(oiio_combine, "_read_channels_subprocess", fake_subprocess_reader)
+    monkeypatch.setattr(oiio_combine, "_try_import_oiio", lambda: "FAKE_OIIO_MODULE")
+
+    result = oiio_combine.read_channels("/a/file.exr", oiiotool_path="/bin/oiiotool")
+    assert result == ["Ci.r", "Ci.g"]
+    assert calls == [("oiio", "/a/file.exr")]
+
+
+def test_read_channels_falls_back_to_subprocess(monkeypatch):
+    """read_channels should fall back when OIIO Python is not importable."""
+    calls = []
+
+    def fake_subprocess_reader(path, oiiotool_path):
+        calls.append(("subprocess", path, oiiotool_path))
+        return ["R", "G", "B"]
+
+    monkeypatch.setattr(oiio_combine, "_read_channels_subprocess", fake_subprocess_reader)
+    monkeypatch.setattr(oiio_combine, "_try_import_oiio", lambda: None)
+
+    result = oiio_combine.read_channels("/a/file.exr", oiiotool_path="/bin/oiiotool")
+    assert result == ["R", "G", "B"]
+    assert calls == [("subprocess", "/a/file.exr", "/bin/oiiotool")]

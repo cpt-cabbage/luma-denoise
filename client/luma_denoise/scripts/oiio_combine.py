@@ -16,6 +16,8 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import re
+import subprocess
 import sys
 from typing import Sequence
 
@@ -76,6 +78,65 @@ def _read_channels_oiio(path: str, oiio_module) -> list[str]:
         return list(spec.channelnames)
     finally:
         inp.close()
+
+
+_CHANNEL_LIST_RE = re.compile(r"^\s*channel list:\s*(.+)\s*$", re.MULTILINE)
+_CHANNEL_TOKEN_RE = re.compile(r"([A-Za-z_][A-Za-z0-9_.]*)(?:\s*\([A-Za-z0-9]+\))?")
+
+
+def _parse_oiiotool_info_channels(stdout: str) -> list[str]:
+    """Extract the channel name list from `oiiotool --info -v` stdout.
+
+    Args:
+        stdout: The stdout captured from invoking `oiiotool --info -v <file>`.
+
+    Returns:
+        List of channel names in file order.
+
+    Raises:
+        RuntimeError: If no 'channel list:' line is found.
+    """
+    match = _CHANNEL_LIST_RE.search(stdout)
+    if not match:
+        raise RuntimeError("oiiotool --info output did not contain a 'channel list:' line")
+    body = match.group(1)
+    channels: list[str] = []
+    for token in body.split(","):
+        m = _CHANNEL_TOKEN_RE.search(token.strip())
+        if m:
+            channels.append(m.group(1))
+    return channels
+
+
+def _read_channels_subprocess(path: str, oiiotool_path: str) -> list[str]:
+    """Read channel names by invoking oiiotool --info -v as a subprocess."""
+    result = subprocess.run(
+        [oiiotool_path, "--info", "-v", path],
+        capture_output=True, text=True, check=False,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(
+            f"oiiotool --info -v {path} failed with exit {result.returncode}: "
+            f"{result.stderr.strip()}"
+        )
+    return _parse_oiiotool_info_channels(result.stdout)
+
+
+def _try_import_oiio():
+    """Attempt to import OpenImageIO. Return the module or None on failure."""
+    try:
+        import OpenImageIO  # type: ignore
+        return OpenImageIO
+    except Exception:
+        return None
+
+
+def read_channels(path: str, oiiotool_path: str) -> list[str]:
+    """Read channel names with OIIO Python preferred, subprocess fallback."""
+    oiio_module = _try_import_oiio()
+    if oiio_module is not None:
+        return _read_channels_oiio(path, oiio_module)
+    return _read_channels_subprocess(path, oiiotool_path)
 
 
 def main(argv: Sequence[str] | None = None) -> int:
