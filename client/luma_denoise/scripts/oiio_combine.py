@@ -16,6 +16,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import fnmatch
 import re
 import subprocess
 import sys
@@ -137,6 +138,83 @@ def read_channels(path: str, oiiotool_path: str) -> list[str]:
     if oiio_module is not None:
         return _read_channels_oiio(path, oiio_module)
     return _read_channels_subprocess(path, oiiotool_path)
+
+
+def apply_exclude_patterns(channels: list[str], patterns: list[str]) -> tuple[list[str], list[str]]:
+    """Split channels into (kept, excluded) based on fnmatch glob patterns.
+
+    A pattern matches a channel if:
+      - fnmatch.fnmatchcase matches the full channel name, OR
+      - fnmatch.fnmatchcase matches the channel's layer (portion before the
+        first '.'). This lets "mse" match "mse.r"/"mse.g"/"mse.b" as a group
+        without requiring users to write "mse.*".
+
+    Returns:
+        (kept, excluded) pair of lists, each preserving input order.
+    """
+    if not patterns:
+        return list(channels), []
+
+    kept: list[str] = []
+    excluded: list[str] = []
+    for ch in channels:
+        layer = ch.split(".", 1)[0]
+        matched = any(
+            fnmatch.fnmatchcase(ch, p) or fnmatch.fnmatchcase(layer, p)
+            for p in patterns
+        )
+        (excluded if matched else kept).append(ch)
+    return kept, excluded
+
+
+def compute_extra_channels(
+    denoised: list[str],
+    raw: list[str],
+    exclude_patterns: list[str],
+) -> list[str]:
+    """Return `raw − denoised − excluded`, preserving raw order."""
+    denoised_set = set(denoised)
+    kept, _ = apply_exclude_patterns(raw, exclude_patterns)
+    return [ch for ch in kept if ch not in denoised_set]
+
+
+def parse_rename_pairs(pairs: list[str]) -> dict[str, str]:
+    """Parse ['src=dst', 'src2=dst2'] into a dict.
+
+    Raises:
+        ValueError: if any pair is malformed.
+    """
+    out: dict[str, str] = {}
+    for pair in pairs:
+        if "=" not in pair:
+            raise ValueError(f"Malformed rename pair (expected 'src=dst'): {pair}")
+        src, dst = pair.split("=", 1)
+        src, dst = src.strip(), dst.strip()
+        if not src or not dst:
+            raise ValueError(f"Empty source or target in rename pair: {pair}")
+        out[src] = dst
+    return out
+
+
+def resolve_chnames(
+    final_channels: list[str],
+    rename_map: dict[str, str],
+) -> list[str] | None:
+    """Apply rename_map to final_channels.
+
+    Returns:
+        The renamed list if AT LEAST ONE channel was renamed.
+        None if no channels match any rename source (caller should skip --chnames).
+    """
+    matched = False
+    out = []
+    for ch in final_channels:
+        if ch in rename_map:
+            out.append(rename_map[ch])
+            matched = True
+        else:
+            out.append(ch)
+    return out if matched else None
 
 
 def main(argv: Sequence[str] | None = None) -> int:

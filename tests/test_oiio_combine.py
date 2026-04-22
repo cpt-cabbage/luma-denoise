@@ -165,3 +165,71 @@ def test_read_channels_falls_back_to_subprocess(monkeypatch):
     result = oiio_combine.read_channels("/a/file.exr", oiiotool_path="/bin/oiiotool")
     assert result == ["R", "G", "B"]
     assert calls == [("subprocess", "/a/file.exr", "/bin/oiiotool")]
+
+
+def test_apply_exclude_patterns_matches_glob():
+    channels = ["Ci.r", "Ci.g", "albedo_mse.r", "mse.r", "mse.g", "sampleCount", "normal.x"]
+    patterns = ["*_mse", "mse", "sampleCount"]
+    kept, excluded = oiio_combine.apply_exclude_patterns(channels, patterns)
+    assert "sampleCount" in excluded
+    assert "normal.x" in kept
+    assert "Ci.r" in kept
+
+
+def test_apply_exclude_patterns_layer_aware():
+    """Pattern 'mse' should match all subchannels via layer-prefix matching."""
+    channels = ["mse.r", "mse.g", "mse.b", "albedo_mse.r"]
+    patterns = ["mse"]
+    kept, excluded = oiio_combine.apply_exclude_patterns(channels, patterns)
+    assert set(excluded) == {"mse.r", "mse.g", "mse.b"}
+    assert kept == ["albedo_mse.r"]
+
+
+def test_apply_exclude_patterns_empty_returns_all():
+    channels = ["R", "G", "B"]
+    kept, excluded = oiio_combine.apply_exclude_patterns(channels, [])
+    assert kept == ["R", "G", "B"]
+    assert excluded == []
+
+
+def test_compute_extra_channels_basic_set_diff():
+    denoised = ["Ci.r", "Ci.g", "Ci.b", "a.Z", "diffuse.r"]
+    raw = ["Ci.r", "Ci.g", "Ci.b", "a.Z", "diffuse.r",
+           "CryptoMaterials00.R", "normal.x", "mse.r"]
+    exclude_patterns = ["mse", "*_mse"]
+    extras = oiio_combine.compute_extra_channels(denoised, raw, exclude_patterns)
+    assert extras == ["CryptoMaterials00.R", "normal.x"]
+
+
+def test_compute_extra_channels_preserves_raw_order():
+    denoised = []
+    raw = ["C", "A", "B"]
+    assert oiio_combine.compute_extra_channels(denoised, raw, []) == ["C", "A", "B"]
+
+
+def test_parse_rename_pairs_valid():
+    pairs = ["Ci.r=R", "Ci.g=G", "a.Z=A"]
+    parsed = oiio_combine.parse_rename_pairs(pairs)
+    assert parsed == {"Ci.r": "R", "Ci.g": "G", "a.Z": "A"}
+
+
+def test_parse_rename_pairs_invalid_raises():
+    try:
+        oiio_combine.parse_rename_pairs(["Ci.r-R"])
+    except ValueError as e:
+        assert "Ci.r-R" in str(e)
+    else:
+        raise AssertionError("expected ValueError")
+
+
+def test_resolve_chnames_only_renames_present_channels():
+    final_channels = ["Ci.r", "Ci.g", "Ci.b", "a.Z", "diffuse.r", "CryptoMaterials00.R"]
+    rename_map = {"Ci.r": "R", "Ci.g": "G", "Ci.b": "B", "a.Z": "A", "missing": "NOPE"}
+    result = oiio_combine.resolve_chnames(final_channels, rename_map)
+    assert result == ["R", "G", "B", "A", "diffuse.r", "CryptoMaterials00.R"]
+
+
+def test_resolve_chnames_returns_none_when_no_matches():
+    final_channels = ["foo", "bar"]
+    rename_map = {"Ci.r": "R"}
+    assert oiio_combine.resolve_chnames(final_channels, rename_map) is None
