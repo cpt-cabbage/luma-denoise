@@ -55,3 +55,41 @@ def test_parse_args_full_surface():
     assert args.data_type == "float"
     assert args.write_manifest is True
     assert args.verbose is True
+
+
+def test_read_channels_oiio_uses_oiio_module(monkeypatch):
+    """_read_channels_oiio calls ImageInput.open and reads channelnames."""
+    class FakeSpec:
+        channelnames = ["R", "G", "B", "A", "Ci.r", "CryptoMaterials.R"]
+
+    class FakeInput:
+        def spec(self):
+            return FakeSpec()
+        def close(self):
+            pass
+
+    class FakeImageInput:
+        @staticmethod
+        def open(path):
+            assert path == "/a/file.exr"
+            return FakeInput()
+
+    fake_oiio = type("oiio", (), {"ImageInput": FakeImageInput})
+    result = oiio_combine._read_channels_oiio("/a/file.exr", fake_oiio)
+    assert result == ["R", "G", "B", "A", "Ci.r", "CryptoMaterials.R"]
+
+
+def test_read_channels_oiio_raises_on_open_failure():
+    """Open returning None must raise."""
+    class FakeInputFailsOpen:
+        @staticmethod
+        def open(path):
+            return None
+
+    fake_oiio = type("oiio", (), {"ImageInput": FakeInputFailsOpen})
+    try:
+        oiio_combine._read_channels_oiio("/a/missing.exr", fake_oiio)
+    except RuntimeError as e:
+        assert "/a/missing.exr" in str(e)
+    else:
+        raise AssertionError("expected RuntimeError")

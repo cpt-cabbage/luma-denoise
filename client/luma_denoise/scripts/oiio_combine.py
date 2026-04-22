@@ -55,6 +55,29 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
+def _read_channels_oiio(path: str, oiio_module) -> list[str]:
+    """Read channel names from an EXR using the OpenImageIO Python module.
+
+    Args:
+        path: Absolute path to the EXR to introspect.
+        oiio_module: The imported OpenImageIO module (injected for testability).
+
+    Returns:
+        List of channel names in file order.
+
+    Raises:
+        RuntimeError: If the file cannot be opened.
+    """
+    inp = oiio_module.ImageInput.open(path)
+    if inp is None:
+        raise RuntimeError(f"OIIO could not open EXR: {path}")
+    try:
+        spec = inp.spec()
+        return list(spec.channelnames)
+    finally:
+        inp.close()
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     args = parse_args(argv)
     # Subsequent tasks will fill in the orchestration body.
