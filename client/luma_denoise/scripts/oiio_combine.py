@@ -17,10 +17,13 @@ from __future__ import annotations
 
 import argparse
 import fnmatch
+import json
 import re
 import shlex
 import subprocess
 import sys
+from datetime import datetime, timezone
+from pathlib import Path
 from typing import Sequence
 
 
@@ -84,6 +87,7 @@ def _read_channels_oiio(path: str, oiio_module) -> list[str]:
 
 _CHANNEL_LIST_RE = re.compile(r"^\s*channel list:\s*(.+)\s*$", re.MULTILINE)
 _CHANNEL_TOKEN_RE = re.compile(r"([A-Za-z_][A-Za-z0-9_.]*)(?:\s*\([A-Za-z0-9]+\))?")
+_FRAME_RE = re.compile(r"\.(\d{3,})(?=\.[A-Za-z0-9]+$)")
 
 
 def _parse_oiiotool_info_channels(stdout: str) -> list[str]:
@@ -266,6 +270,64 @@ def build_oiiotool_argv(
 
     argv.extend(["-o", output])
     return argv
+
+
+def _derive_frame_from_path(path: str) -> int | None:
+    """Extract a frame number from '<name>.<NNNN>.<ext>' style paths."""
+    m = _FRAME_RE.search(path)
+    return int(m.group(1)) if m else None
+
+
+def build_manifest(
+    denoised_path: str,
+    raw_path: str,
+    output_path: str,
+    pass_through: bool,
+    denoised_channels: list[str],
+    raw_channels: list[str],
+    exclude_patterns_user: list[str],
+    exclude_patterns_default: list[str],
+    excluded_channels: list[str],
+    appended_channels: list[str],
+    chnames_applied: dict[str, str],
+    oiiotool_argv: list[str],
+    exit_code: int,
+) -> dict:
+    """Assemble the per-frame combine manifest dict."""
+    return {
+        "timestamp": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "frame": _derive_frame_from_path(output_path),
+        "denoised_path": denoised_path,
+        "raw_path": raw_path,
+        "output_path": output_path,
+        "pass_through": pass_through,
+        "denoised_channels": denoised_channels,
+        "raw_channels": raw_channels,
+        "exclude_patterns_user": exclude_patterns_user,
+        "exclude_patterns_default": exclude_patterns_default,
+        "excluded_channels": excluded_channels,
+        "appended_channels": appended_channels,
+        "chnames_applied": chnames_applied,
+        "oiiotool_command": " ".join(oiiotool_argv),
+        "exit_code": exit_code,
+    }
+
+
+def write_manifest(output_path: str, manifest: dict) -> bool:
+    """Write <output_path>.combine.json alongside the output EXR.
+
+    Returns:
+        True on success, False on any error (logged via stderr, never raised).
+    """
+    output_pathobj = Path(output_path)
+    sidecar = output_pathobj.with_suffix(output_pathobj.suffix + ".combine.json")
+    try:
+        sidecar.write_text(json.dumps(manifest, indent=2))
+        return True
+    except Exception as e:
+        print(f"[oiio_combine] WARN: could not write manifest {sidecar}: {e}",
+              file=sys.stderr)
+        return False
 
 
 def main(argv: Sequence[str] | None = None) -> int:

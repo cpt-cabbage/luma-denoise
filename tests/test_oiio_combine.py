@@ -356,3 +356,61 @@ def test_build_oiiotool_argv_empty_extras_no_ch_flags():
     assert "--ch" not in argv
     assert "--chappend" not in argv
     assert "--chnames" in argv
+
+
+def test_build_manifest_structure():
+    manifest = oiio_combine.build_manifest(
+        denoised_path="/a/d.exr",
+        raw_path="/a/r.exr",
+        output_path="/a/o.exr",
+        pass_through=False,
+        denoised_channels=["Ci.r", "Ci.g", "Ci.b", "a.Z"],
+        raw_channels=["Ci.r", "CryptoMaterials00.R", "mse.r"],
+        exclude_patterns_user=["debug_*"],
+        exclude_patterns_default=["*_mse", "mse", "sampleCount"],
+        excluded_channels=["mse.r"],
+        appended_channels=["CryptoMaterials00.R"],
+        chnames_applied={"Ci.r": "R", "Ci.g": "G", "Ci.b": "B", "a.Z": "A"},
+        oiiotool_argv=["/bin/oiiotool", "/a/d.exr", "-o", "/a/o.exr"],
+        exit_code=0,
+    )
+    assert manifest["denoised_path"] == "/a/d.exr"
+    assert manifest["raw_path"] == "/a/r.exr"
+    assert manifest["output_path"] == "/a/o.exr"
+    assert manifest["pass_through"] is False
+    assert manifest["denoised_channels"] == ["Ci.r", "Ci.g", "Ci.b", "a.Z"]
+    assert manifest["raw_channels"] == ["Ci.r", "CryptoMaterials00.R", "mse.r"]
+    assert manifest["exclude_patterns_user"] == ["debug_*"]
+    assert manifest["exclude_patterns_default"] == ["*_mse", "mse", "sampleCount"]
+    assert manifest["excluded_channels"] == ["mse.r"]
+    assert manifest["appended_channels"] == ["CryptoMaterials00.R"]
+    assert manifest["chnames_applied"] == {"Ci.r": "R", "Ci.g": "G", "Ci.b": "B", "a.Z": "A"}
+    assert manifest["oiiotool_command"] == "/bin/oiiotool /a/d.exr -o /a/o.exr"
+    assert manifest["exit_code"] == 0
+    assert "timestamp" in manifest
+    assert "frame" in manifest
+
+
+def test_write_manifest_handles_write_failure(tmp_path):
+    """Manifest write errors must be caught and logged without raising."""
+    output = tmp_path / "does" / "not" / "exist" / "out.exr"
+    rc = oiio_combine.write_manifest(str(output), {"foo": "bar"})
+    assert rc is False
+
+
+def test_write_manifest_writes_sidecar(tmp_path):
+    output = tmp_path / "out.exr"
+    output.write_bytes(b"fake exr content")
+    rc = oiio_combine.write_manifest(str(output), {"foo": "bar"})
+    sidecar = tmp_path / "out.exr.combine.json"
+    assert rc is True
+    assert sidecar.exists()
+    import json
+    assert json.loads(sidecar.read_text())["foo"] == "bar"
+
+
+def test_derive_frame_from_path():
+    assert oiio_combine._derive_frame_from_path("/a/shot.1001.exr") == 1001
+    assert oiio_combine._derive_frame_from_path("/a/shot.0042.exr") == 42
+    assert oiio_combine._derive_frame_from_path("/a/shot_name.exr") is None
+    assert oiio_combine._derive_frame_from_path("/a/shot.v044.exr") is None
