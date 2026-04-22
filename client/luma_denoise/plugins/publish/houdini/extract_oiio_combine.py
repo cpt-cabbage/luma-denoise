@@ -7,6 +7,11 @@ import pyblish.api
 from ayon_core.pipeline import AYONPyblishPluginMixin
 from ayon_deadline import abstract_submit_deadline
 
+try:
+    from luma_denoise.version import __version__ as _ADDON_VERSION
+except Exception:
+    _ADDON_VERSION = "unknown"
+
 
 # Default exclude patterns mirror the server settings default. Kept here as a
 # safety net in case the settings entry is missing from project bundles.
@@ -168,6 +173,19 @@ class ExtractOiioCombine(
         os.makedirs(os.path.dirname(output_path), exist_ok=True)
 
         python_exe = oiio_settings.get("python_executable", "python")
+
+        wrapper_template = oiio_settings.get("wrapper_script_path", "")
+        if not wrapper_template:
+            raise RuntimeError(
+                "luma-denoise: 'wrapper_script_path' is not configured. "
+                "Set it in the luma-denoise project settings to the absolute "
+                "path of oiio_combine.py on a shared filesystem accessible "
+                "from all render nodes. Use the {version} token for "
+                "per-version paths, e.g. "
+                "'L:/tools/.../luma_denoise_scripts/{version}/oiio_combine.py'."
+            )
+        wrapper_path = wrapper_template.replace("{version}", _ADDON_VERSION)
+
         default_excludes = list(DEFAULT_EXCLUDE_PATTERNS)
         user_excludes = list(oiio_settings.get(
             "channel_exclude_patterns", default_excludes))
@@ -190,7 +208,7 @@ class ExtractOiioCombine(
         verbose = oiio_settings.get("wrapper_verbose_logging", True)
 
         parts: list[str] = []
-        parts.append("oiio_combine.py")
+        parts.append(self._quote(wrapper_path))
         parts.extend(["--denoised", self._quote(denoised_path)])
         parts.extend(["--raw", self._quote(renders_path)])
         parts.extend(["--output", self._quote(output_path)])
@@ -231,22 +249,6 @@ class ExtractOiioCombine(
         if " " in value and not (value.startswith('"') and value.endswith('"')):
             return f'"{value}"'
         return value
-
-    def get_aux_files(self):
-        """Deliver the wrapper script to the Deadline worker.
-
-        Returns:
-            list[str]: Single-element list with the absolute path to
-                oiio_combine.py. Deadline's AuxFiles mechanism copies it into
-                the worker's job directory where `python oiio_combine.py` can
-                resolve it.
-        """
-        script_path = os.path.join(
-            os.path.dirname(os.path.dirname(
-                os.path.dirname(os.path.dirname(__file__)))),
-            "scripts", "oiio_combine.py",
-        )
-        return [script_path.replace("\\", "/")]
 
     def process(self, instance):
         self._instance = instance

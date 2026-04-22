@@ -125,6 +125,21 @@ class LumaDenoiseSettings(BaseSettingsModel):
     )
 
     # --- Wrapper-script tunables ---
+    wrapper_script_path: str = SettingsField(
+        "",
+        title="Wrapper Script Path",
+        description=(
+            "Absolute path to oiio_combine.py on a shared filesystem "
+            "accessible from both the submitting machine AND every Deadline "
+            "render node. Supports the {version} token — substituted at "
+            "submission time with the luma-denoise addon version, so the "
+            "same template can survive addon upgrades. "
+            "Example: 'L:/tools/.../luma_denoise_scripts/{version}/oiio_combine.py'. "
+            "MUST be configured for the OIIO combine step to submit — leaving "
+            "this empty will raise a clear error during publish."
+        ),
+    )
+
     python_executable: str = SettingsField(
         "python",
         title="Python Executable",
