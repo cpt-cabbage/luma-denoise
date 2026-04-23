@@ -87,6 +87,16 @@ class LumaDenoiseSettings(BaseSettingsModel):
         description="Renderman license server or file location",
     )
 
+    tiled_denoise_threshold: int = SettingsField(
+        2048,
+        title="Tiled Denoise Resolution Threshold",
+        description=(
+            "Minimum resolution (width or height) at which tiled denoising "
+            "is enabled. Images with either dimension at or above this value "
+            "will be denoised in tiles to reduce memory usage."
+        ),
+    )
+
     # OIIO combine settings - always enabled by default
     oiio_enabled: bool = SettingsField(
         True,
