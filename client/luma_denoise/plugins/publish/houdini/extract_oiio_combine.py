@@ -141,28 +141,23 @@ class ExtractOiioCombine(
             r"L:\tools\_studio_tools\AYON\AYON-1.3.3-windows"
             r"\addons_resources\ayon_third_party\oiio_windows_83e412e9",
         )
-        oiiotool_path = os.path.join(oiio_root, "bin", "oiiotool.exe")
+        oiiotool_path = os.path.join(oiio_root, "bin", "oiiotool.exe").replace("\\", "/")
 
         first_file = files[0]
-        dirname = os.path.dirname(first_file)
+        dirname = os.path.dirname(first_file).replace("\\", "/")
         filename = os.path.basename(first_file)
         shot_name = filename.split('.')[0]
         extension = filename.split('.')[-1]
 
-        renders_path = os.path.join(
-            dirname, f'{shot_name}.<STARTFRAME%4>.{extension}')
+        renders_path = f"{dirname}/{shot_name}.<STARTFRAME%4>.{extension}"
         output_subdirectory = oiio_settings.get("output_subdirectory", "combined")
-        output_path = os.path.join(
-            dirname, output_subdirectory,
-            f'{shot_name}.<STARTFRAME%4>.{extension}')
+        output_path = f"{dirname}/{output_subdirectory}/{shot_name}.<STARTFRAME%4>.{extension}"
 
         denoise_enabled = instance.data.get("denoise", False)
         denoise_ran = denoise_enabled and "denoise_job_id" in instance.data
 
         if denoise_ran:
-            denoised_path = os.path.join(
-                dirname, 'denoised',
-                f'{shot_name}.<STARTFRAME%4>.{extension}')
+            denoised_path = f"{dirname}/denoised/{shot_name}.<STARTFRAME%4>.{extension}"
             rename_pairs_cfg = oiio_settings.get(
                 "beauty_rename_map_denoised", DEFAULT_RENAME_DENOISED)
         else:
