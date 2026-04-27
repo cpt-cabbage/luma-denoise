@@ -373,7 +373,6 @@ def test_build_manifest_structure():
         appended_channels=["CryptoMaterials00.R"],
         chnames_applied={"Ci.r": "R", "Ci.g": "G", "Ci.b": "B", "a.Z": "A"},
         oiiotool_argv=["/bin/oiiotool", "/a/d.exr", "-o", "/a/o.exr"],
-        exit_code=0,
     )
     assert manifest["denoised_path"] == "/a/d.exr"
     assert manifest["raw_path"] == "/a/r.exr"
@@ -387,9 +386,33 @@ def test_build_manifest_structure():
     assert manifest["appended_channels"] == ["CryptoMaterials00.R"]
     assert manifest["chnames_applied"] == {"Ci.r": "R", "Ci.g": "G", "Ci.b": "B", "a.Z": "A"}
     assert manifest["oiiotool_command"] == "/bin/oiiotool /a/d.exr -o /a/o.exr"
-    assert manifest["exit_code"] == 0
     assert "timestamp" in manifest
-    assert "frame" in manifest
+    # Sequence-level: per-frame fields are intentionally absent.
+    assert "frame" not in manifest
+    assert "exit_code" not in manifest
+
+
+def test_build_manifest_normalizes_frame_token():
+    manifest = oiio_combine.build_manifest(
+        denoised_path="/a/denoised/shot.0042.exr",
+        raw_path="/a/shot.0042.exr",
+        output_path="/a/combined/shot.0042.exr",
+        pass_through=False,
+        denoised_channels=[],
+        raw_channels=[],
+        exclude_patterns_user=[],
+        exclude_patterns_default=[],
+        excluded_channels=[],
+        appended_channels=[],
+        chnames_applied={},
+        oiiotool_argv=["/bin/oiiotool", "/a/denoised/shot.0042.exr",
+                       "-o", "/a/combined/shot.0042.exr"],
+    )
+    assert manifest["denoised_path"] == "/a/denoised/shot.####.exr"
+    assert manifest["raw_path"] == "/a/shot.####.exr"
+    assert manifest["output_path"] == "/a/combined/shot.####.exr"
+    assert ("/a/denoised/shot.####.exr" in manifest["oiiotool_command"]
+            and "/a/combined/shot.####.exr" in manifest["oiiotool_command"])
 
 
 def test_write_manifest_handles_write_failure(tmp_path):
@@ -403,18 +426,37 @@ def test_write_manifest_writes_sidecar(tmp_path):
     output = tmp_path / "out.exr"
     output.write_bytes(b"fake exr content")
     rc = oiio_combine.write_manifest(str(output), {"foo": "bar"})
-    sidecar = tmp_path / "out.exr.combine.json"
+    # Sequence-level: '<stem>.combine.json', not '<name>.<ext>.combine.json'.
+    sidecar = tmp_path / "out.combine.json"
     assert rc is True
     assert sidecar.exists()
     import json
     assert json.loads(sidecar.read_text())["foo"] == "bar"
 
 
-def test_derive_frame_from_path():
-    assert oiio_combine._derive_frame_from_path("/a/shot.1001.exr") == 1001
-    assert oiio_combine._derive_frame_from_path("/a/shot.0042.exr") == 42
-    assert oiio_combine._derive_frame_from_path("/a/shot_name.exr") is None
-    assert oiio_combine._derive_frame_from_path("/a/shot.v044.exr") is None
+def test_write_manifest_strips_frame_from_sidecar(tmp_path):
+    output = tmp_path / "combined" / "shot.1001.exr"
+    output.parent.mkdir(parents=True)
+    rc = oiio_combine.write_manifest(str(output), {"foo": "bar"})
+    sidecar = tmp_path / "combined" / "shot.combine.json"
+    assert rc is True
+    assert sidecar.exists()
+    # The per-frame variant must NOT exist.
+    assert not (tmp_path / "combined" / "shot.1001.exr.combine.json").exists()
+
+
+def test_strip_frame_token():
+    assert oiio_combine._strip_frame_token("/a/shot.1001.exr") == "/a/shot.####.exr"
+    assert oiio_combine._strip_frame_token("/a/shot.0042.exr") == "/a/shot.####.exr"
+    assert oiio_combine._strip_frame_token("/a/shot_name.exr") == "/a/shot_name.exr"
+    assert oiio_combine._strip_frame_token("/a/shot.v044.exr") == "/a/shot.v044.exr"
+
+
+def test_sequence_sidecar_path():
+    p = oiio_combine._sequence_sidecar_path("/a/shot.1001.exr")
+    assert p.as_posix() == "/a/shot.combine.json"
+    p = oiio_combine._sequence_sidecar_path("/a/no_frame.exr")
+    assert p.as_posix() == "/a/no_frame.combine.json"
 
 
 def test_main_end_to_end_mocked(monkeypatch, tmp_path):
@@ -473,13 +515,14 @@ def test_main_end_to_end_mocked(monkeypatch, tmp_path):
     assert "CryptoMaterials00.R" in extras
     assert "normal.x" in extras
     assert "mse.r" not in extras
-    sidecar = tmp_path / "combined" / "shot.1001.exr.combine.json"
+    sidecar = tmp_path / "combined" / "shot.combine.json"
     assert sidecar.exists()
     import json
     manifest = json.loads(sidecar.read_text())
-    assert manifest["frame"] == 1001
-    assert manifest["exit_code"] == 0
+    assert "frame" not in manifest
+    assert "exit_code" not in manifest
     assert manifest["pass_through"] is False
+    assert manifest["output_path"].endswith("shot.####.exr")
 
 
 def test_main_pass_through_when_denoised_equals_raw(monkeypatch, tmp_path):
@@ -520,7 +563,7 @@ def test_main_pass_through_when_denoised_equals_raw(monkeypatch, tmp_path):
     assert "--chappend" not in argv
     assert "--chnames" in argv
 
-    sidecar = output.with_suffix(output.suffix + ".combine.json")
+    sidecar = tmp_path / "combined" / "shot.combine.json"
     import json
     m = json.loads(sidecar.read_text())
     assert m["pass_through"] is True

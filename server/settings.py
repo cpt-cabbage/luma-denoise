@@ -245,11 +245,12 @@ class LumaDenoiseSettings(BaseSettingsModel):
 
     write_combine_manifest: bool = SettingsField(
         True,
-        title="Write Per-Frame Combine Manifest",
+        title="Write Combine Manifest",
         description=(
-            "When True, the wrapper writes a <output>.combine.json sidecar "
-            "per frame recording every channel decision. Useful for "
-            "debugging; disable once the pipeline is stable."
+            "When True, the wrapper writes one <name>.combine.json sidecar "
+            "per render sequence (frame token stripped from the sidecar "
+            "name) recording every channel decision. Useful for debugging; "
+            "disable once the pipeline is stable."
         ),
     )
 

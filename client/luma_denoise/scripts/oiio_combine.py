@@ -4,6 +4,10 @@ Runs per-frame on a Deadline worker. Reads the denoised and raw EXR channel
 lists, computes the set-difference minus exclude patterns, resolves a beauty
 rename map, builds an oiiotool command on the fly, and invokes it.
 
+When --write-manifest is set, a single sequence-level <name>.combine.json
+sidecar is written next to the combined EXRs (frame token stripped from the
+sidecar name so all frames in a sequence write to the same file).
+
 Usage:
     python oiio_combine.py
         --denoised <path> --raw <path> --output <path> --oiiotool <path>
@@ -18,6 +22,7 @@ from __future__ import annotations
 import argparse
 import fnmatch
 import json
+import os
 import re
 import shlex
 import subprocess
@@ -61,7 +66,8 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
                         choices=["preserve", "float", "half"],
                         help="Output data type policy.")
     parser.add_argument("--write-manifest", action="store_true",
-                        help="Emit <output>.combine.json per frame.")
+                        help="Emit one <output>.combine.json per sequence "
+                             "(frame token stripped from sidecar name).")
     parser.add_argument("--verbose", "-v", action="store_true",
                         help="Verbose logging.")
     return parser.parse_args(argv)
@@ -284,10 +290,27 @@ def build_oiiotool_argv(
     return argv
 
 
-def _derive_frame_from_path(path: str) -> int | None:
-    """Extract a frame number from '<name>.<NNNN>.<ext>' style paths."""
-    m = _FRAME_RE.search(path)
-    return int(m.group(1)) if m else None
+def _strip_frame_token(path: str) -> str:
+    """Replace '.NNNN.' frame digits in a path with '.####.' tokens.
+
+    Used to normalize frame-specific paths so the sequence-level manifest
+    describes the sequence as a whole rather than the specific frame this
+    Deadline worker happened to run.
+    """
+    return _FRAME_RE.sub(lambda m: "." + "#" * len(m.group(1)), path)
+
+
+def _sequence_sidecar_path(output_path: str) -> Path:
+    """Derive the sequence-level manifest path from a per-frame output path.
+
+    '<dir>/<name>.<NNNN>.<ext>' -> '<dir>/<name>.combine.json'
+    '<dir>/<name>.<ext>'        -> '<dir>/<name>.combine.json'
+    """
+    p = Path(output_path)
+    name = p.name
+    m = _FRAME_RE.search(name)
+    base = name[:m.start()] if m else p.stem
+    return p.parent / f"{base}.combine.json"
 
 
 def build_manifest(
@@ -303,15 +326,18 @@ def build_manifest(
     appended_channels: list[str],
     chnames_applied: dict[str, str],
     oiiotool_argv: list[str],
-    exit_code: int,
 ) -> dict:
-    """Assemble the per-frame combine manifest dict."""
+    """Assemble the sequence-level combine manifest dict.
+
+    Frame digits in path-like fields are normalized to '####' so the manifest
+    describes the sequence as a whole. Per-frame state (frame number, exit
+    code) is intentionally not included — those belong in the Deadline log.
+    """
     return {
         "timestamp": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-        "frame": _derive_frame_from_path(output_path),
-        "denoised_path": denoised_path,
-        "raw_path": raw_path,
-        "output_path": output_path,
+        "denoised_path": _strip_frame_token(denoised_path),
+        "raw_path": _strip_frame_token(raw_path),
+        "output_path": _strip_frame_token(output_path),
         "pass_through": pass_through,
         "denoised_channels": denoised_channels,
         "raw_channels": raw_channels,
@@ -320,25 +346,34 @@ def build_manifest(
         "excluded_channels": excluded_channels,
         "appended_channels": appended_channels,
         "chnames_applied": chnames_applied,
-        "oiiotool_command": " ".join(oiiotool_argv),
-        "exit_code": exit_code,
+        "oiiotool_command": " ".join(_strip_frame_token(a) for a in oiiotool_argv),
     }
 
 
 def write_manifest(output_path: str, manifest: dict) -> bool:
-    """Write <output_path>.combine.json alongside the output EXR.
+    """Write a sequence-level <name>.combine.json sidecar.
+
+    All frames in a sequence resolve to the same sidecar path, so concurrent
+    Deadline workers race to write it. We write to a PID-unique temp file and
+    atomically rename — last writer wins, but the sidecar is never corrupt
+    (manifest content is identical across frames, so last-wins is safe).
 
     Returns:
         True on success, False on any error (logged via stderr, never raised).
     """
-    output_pathobj = Path(output_path)
-    sidecar = output_pathobj.with_suffix(output_pathobj.suffix + ".combine.json")
+    sidecar = _sequence_sidecar_path(output_path)
+    tmp = sidecar.with_name(f".{sidecar.name}.{os.getpid()}.tmp")
     try:
-        sidecar.write_text(json.dumps(manifest, indent=2))
+        tmp.write_text(json.dumps(manifest, indent=2))
+        os.replace(tmp, sidecar)
         return True
     except Exception as e:
         print(f"[oiio_combine] WARN: could not write manifest {sidecar}: {e}",
               file=sys.stderr)
+        try:
+            tmp.unlink()
+        except OSError:
+            pass
         return False
 
 
@@ -440,7 +475,6 @@ def _run(args: argparse.Namespace) -> int:
             appended_channels=extra_channels,
             chnames_applied=chnames_applied,
             oiiotool_argv=argv_oiiotool,
-            exit_code=result.returncode,
         )
         write_manifest(args.output, manifest)
 
