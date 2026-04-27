@@ -1,21 +1,36 @@
 import os
-import sys
-import json
 from copy import deepcopy
 from dataclasses import dataclass, field, asdict
+
 import pyblish.api
 
 from ayon_core.pipeline import AYONPyblishPluginMixin
 from ayon_deadline import abstract_submit_deadline
-from ayon_core.lib.vendor_bin_utils import get_oiio_tools_path
 
-# Import pass builder utilities
-sys.path.append(r"L:\tools\_studio_tools\AYON\_dev\christophe\la_shot_tools\luma_tools\python")
 try:
-    from render_service import load_pass_config, build_oiio_command
-    PASS_BUILDER_AVAILABLE = True
-except ImportError:
-    PASS_BUILDER_AVAILABLE = False
+    from luma_denoise.version import __version__ as _ADDON_VERSION
+except Exception:
+    _ADDON_VERSION = "unknown"
+
+
+# Default exclude patterns mirror the server settings default. Kept here as a
+# safety net in case the settings entry is missing from project bundles.
+DEFAULT_EXCLUDE_PATTERNS: list[str] = ["*_mse", "mse", "sampleCount"]
+
+# Default rename maps. Settings override these per-project.
+DEFAULT_RENAME_DENOISED: list[dict[str, str]] = [
+    {"source": "Ci.r", "target": "R"},
+    {"source": "Ci.g", "target": "G"},
+    {"source": "Ci.b", "target": "B"},
+    {"source": "a.Z", "target": "A"},
+]
+DEFAULT_RENAME_RAW: list[dict[str, str]] = [
+    {"source": "beauty.r", "target": "R"},
+    {"source": "beauty.g", "target": "G"},
+    {"source": "beauty.b", "target": "B"},
+    {"source": "a.Z", "target": "A"},
+]
+
 
 @dataclass
 class CommandLinePluginInfo:
@@ -30,10 +45,19 @@ class CommandLinePluginInfo:
 class ExtractOiioCombine(
         abstract_submit_deadline.AbstractSubmitDeadline,
         AYONPyblishPluginMixin):
-    """Combine denoised and original EXR files using OIIO after denoising is complete.
+    """Submit a Deadline CommandLine job that runs oiio_combine.py per frame.
 
-    This plugin runs oiiotool to merge denoised beauty passes with original AOVs
-    into final EXR files for publish.
+    The wrapper script reads channel lists of the denoised and raw EXRs at
+    runtime, computes the set-difference minus exclude patterns, renames the
+    beauty layer to R/G/B/A (Nuke convention), and invokes oiiotool to emit
+    the final combined EXR.
+
+    Stubs filled in at submit time:
+      - dependency (denoise job, or render job in pass-through)
+      - file paths and frame-token substitutions
+      - setting-driven wrapper CLI flags
+
+    Channel selection and rename logic lives in the wrapper script, not here.
     """
 
     label = "Submit OIIO Combine to Deadline"
@@ -46,41 +70,29 @@ class ExtractOiioCombine(
         instance = self._instance
         context = instance.context
 
-        # Ensure all previous results are successful
         assert all(
             result["success"] for result in context.data["results"]
         ), "Errors found, aborting integration.."
 
-        # Get OIIO settings from project settings
         project_settings = context.data["project_settings"]
         oiio_settings = project_settings.get("luma-denoise", {})
 
         filepath = context.data["currentFile"]
         scenename = os.path.basename(filepath)
-        job_name = "{scene} - {instance} [OIIO COMBINE]".format(scene=scenename, instance=instance.name)
+        job_name = "{scene} - {instance} [OIIO COMBINE]".format(
+            scene=scenename, instance=instance.name)
         batch_name = f"{scenename}"
 
         job_info.Name = job_name
         job_info.BatchName = batch_name
         job_info.Plugin = "CommandLine"
+        job_info.Priority = oiio_settings.get("combine_deadline_priority", 40)
+        job_info.Pool = oiio_settings.get("combine_pool", "luma")
+        job_info.Group = oiio_settings.get("combine_group", "combine_group")
 
-        # Set job priority from settings
-        job_priority = oiio_settings.get("combine_deadline_priority", 40)
-        job_info.Priority = job_priority
-
-        # Set pool from settings
-        job_pool = oiio_settings.get("combine_pool", "luma")
-        job_info.Pool = job_pool
-
-        # Set group from settings
-        job_group = oiio_settings.get("combine_group", "combine_group")
-        job_info.Group = job_group
-
-        # Set job dependencies on denoise jobs
         if dependency_job_ids:
             job_info.JobDependencies = dependency_job_ids
 
-        # Set frames to match the render frames, respecting custom frames
         publish_attrs = instance.data.get("publish_attributes", {})
         jobinfo_attrs = publish_attrs.get("CollectJobInfo", {})
         use_custom = jobinfo_attrs.get("use_custom_frames", "none")
@@ -94,7 +106,6 @@ class ExtractOiioCombine(
             step = instance.data.get("byFrameStep", 1)
             job_info.Frames = f"{int(start_frame)}-{int(end_frame)}x{int(step)}"
 
-        # Set output directories for combined results
         output_subdirectory = oiio_settings.get("output_subdirectory", "combined")
         if instance.data.get("files"):
             first_file = instance.data["files"][0]
@@ -103,13 +114,9 @@ class ExtractOiioCombine(
             shot_name = filename.split('.')[0]
             extension = filename.split('.')[-1]
             combined_dir = os.path.join(dirname, output_subdirectory)
-
-            # Ensure the output directory exists
             os.makedirs(combined_dir, exist_ok=True)
-
             job_info.OutputDirectory[0] = combined_dir.replace("\\", "/")
             job_info.OutputFilename[0] = f'{shot_name}.<STARTFRAME%4>.{extension}'
-
 
         return job_info
 
@@ -117,265 +124,196 @@ class ExtractOiioCombine(
         instance = self._instance
         files = instance.data.get("files", [])
 
-        # Get OIIO settings from project settings
-        project_settings = instance.context.data["project_settings"]
-        oiio_settings = project_settings.get("luma-denoise", {})
-
-        # Build the executable path from settings
-        oiio_root = oiio_settings.get("oiio_root_path", "L:\tools\_studio_tools\AYON\AYON-1.3.3-windows\addons_resources\ayon_third_party\oiio_windows_83e412e9")
-
-        executable_path = oiio_root + r"\bin\oiiotool.exe"
-        os.environ["PATH"] += os.pathsep + oiio_root
-
-        # For combining, we need to handle per-frame processing
-        if files:
-            first_file = files[0]
-            dirname = os.path.dirname(first_file)
-            basename = os.path.basename(first_file)
-            filename = os.path.basename(first_file)
-            shot_name = filename.split('.')[0]
-            extension = filename.split('.')[-1]
-
-            # Build paths similar to oiio.py
-            denoised_path = os.path.join(dirname, 'denoised', f'{shot_name}.<STARTFRAME%4>.{extension}')
-            renders_path = os.path.join(dirname, f'{shot_name}.<STARTFRAME%4>.{extension}')
-            output_subdirectory = oiio_settings.get("output_subdirectory", "combined")
-            output_path = os.path.join(dirname, output_subdirectory, f'{shot_name}.<STARTFRAME%4>.{extension}')
-
-            # Ensure output directory exists
-            output_dir = os.path.dirname(output_path)
-            os.makedirs(output_dir, exist_ok=True)
-
-            # Check for passes file first (from pass_builder)
-            # Navigate up from renders directory to find task work directory
-            # Path structure: .../work/{task}/img/renders/version/file.exr
-            # We need: .../work/{task}/shot_data/shot_name.json
-
-            # Get task name from instance
-            task_entity = instance.data.get("taskEntity")
-            task_name = task_entity.get("name") if task_entity else None
-            self.log.debug(f"Task name from instance: {task_name}")
-
-            # Navigate up to find task directory
-            task_dir = dirname
-            if task_name:
-                # Go up directories until we find the task directory
-                for _ in range(5):  # Safety limit to prevent infinite loop
-                    parent = os.path.dirname(task_dir)
-                    if os.path.basename(task_dir) == task_name:
-                        break
-                    task_dir = parent
-                self.log.debug(f"Resolved task directory: {task_dir}")
-
-            shot_data_dir = os.path.join(task_dir, "shot_data")
-            passes_file = os.path.join(shot_data_dir, f"{shot_name}.json")
-            self.log.debug(f"Looking for passes file: {passes_file}")
-
-            OIIO_args = ''
-            passdict = {}
-
-            if PASS_BUILDER_AVAILABLE and os.path.isfile(passes_file):
-                # Use pass builder logic when passes file exists
-                self.log.info(f"Using passes file: {passes_file}")
-                try:
-                    passes_dict = load_pass_config(passes_file)
-                    if passes_dict:
-                        # Use the pass_builder's build_oiio_command function
-                        OIIO_args = build_oiio_command(passes_dict, denoised_path, renders_path, output_path)
-                        # Store passes dict for reference
-                        passdict = passes_dict
-                        instance.data["passdict"] = passdict
-                        self.log.info(f"Built OIIO command from passes file with {len(passes_dict)} passes")
-                    else:
-                        self.log.warning(f"Passes file is empty, falling back to OIIO settings")
-                        # Fall through to settings-based logic below
-                        passes_dict = None
-                except Exception as e:
-                    self.log.warning(f"Failed to load passes file: {e}, falling back to OIIO settings")
-                    passes_dict = None
-            else:
-                if not PASS_BUILDER_AVAILABLE:
-                    self.log.info("Pass builder module not available, using OIIO settings")
-                else:
-                    self.log.info(f"Passes file not found: {passes_file}, using OIIO settings")
-                passes_dict = None
-
-            # Fallback to settings-based configuration if passes file not used
-            if not OIIO_args:
-                # Get AOV settings from project settings
-                include_aovs = oiio_settings.get("include_aovs", True)
-                crypto_materials = oiio_settings.get("crypto_materials", True)
-                crypto_primitives = oiio_settings.get("crypto_primitives", False)
-                diffuse = oiio_settings.get("diffuse", True)
-                specular = oiio_settings.get("specular", True)
-                albedo = oiio_settings.get("albedo", False)
-                normals = oiio_settings.get("normals", True)
-                position = oiio_settings.get("position", True)
-                uv = oiio_settings.get("uv", False)
-                depth = oiio_settings.get("depth", False)
-
-            if not OIIO_args and include_aovs:
-                OIIO_args += denoised_path
-                OIIO_args += r" --ch Beauty.R,Beauty.G,Beauty.B,a.Z"
-                if crypto_materials:
-                    passdict["CryptoMaterials"] = ["CryptoMaterials.R","CryptoMaterials.G","CryptoMaterials.B"]
-                    OIIO_args += ",CryptoMaterials.R,CryptoMaterials.G,CryptoMaterials.B"
-                if crypto_primitives:
-                    passdict["CryptoPrimitives"] = ["CryptoPrimitives.R","CryptoPrimitives.G","CryptoPrimitives.B"]
-                    OIIO_args += ",CryptoPrimitives.R,CryptoPrimitives.G,CryptoPrimitives.B"
-                if diffuse:
-                    passdict["diffuse"] = ["diffuse.R","diffuse.G","diffuse.B"]
-                    OIIO_args += ",diffuse.R,diffuse.G,diffuse.B"
-                if specular:
-                    passdict["specular"] = ["specular.R","specular.G","specular.B"]
-                    OIIO_args += ",specular.R,specular.G,specular.B"
-                if albedo:
-                    passdict["albedo"] = ["albedo.R","albedo.G","albedo.B"]
-                    OIIO_args += ",albedo.R,albedo.G,albedo.B"
-                if position:
-                    passdict["P"] = ["P.x","P.y","P.z"]
-                    OIIO_args += ",P.x,P.y,P.z"
-                if uv:
-                    passdict["uv"] = ["uv.R","uv.G","uv.B"]
-                    OIIO_args += ",uv.R,uv.G,uv.B"
-                if depth:
-                    passdict["zfiltered"] = ["zfiltered.Z"]
-                    OIIO_args += ",zfiltered.Z"
-                OIIO_args += " " + renders_path
-                OIIO_args += r' --ch '
-                if crypto_materials:
-                    OIIO_args += 'CryptoMaterials00.R,CryptoMaterials00.G,CryptoMaterials00.B,CryptoMaterials00.A,CryptoMaterials01.R,CryptoMaterials01.G,CryptoMaterials01.B,CryptoMaterials01.A,CryptoMaterials02.R,CryptoMaterials02.G,CryptoMaterials02.B,CryptoMaterials02.A'
-                if crypto_primitives:
-                    if crypto_materials:
-                        OIIO_args += ','
-                    OIIO_args += 'CryptoPrimitives00.R,CryptoPrimitives00.G,CryptoPrimitives00.B,CryptoPrimitives00.A,CryptoPrimitives01.R,CryptoPrimitives01.G,CryptoPrimitives01.B,CryptoPrimitives01.A,CryptoPrimitives02.R,CryptoPrimitives02.G,CryptoPrimitives02.B,CryptoPrimitives02.A'
-                if normals:
-                    if crypto_materials or crypto_primitives:
-                        OIIO_args += ","
-                    OIIO_args += "normal.x,normal.y,normal.z"
-
-                OIIO_args += r' --chappend'
-                OIIO_args += r' --chnames R,G,B,A'
-                if crypto_materials:
-                    OIIO_args += ",CryptoMaterials.R,CryptoMaterials.G,CryptoMaterials.B"
-                if crypto_primitives:
-                    OIIO_args += ",CryptoPrimitives.R,CryptoPrimitives.G,CryptoPrimitives.B"
-                if diffuse:
-                    OIIO_args += ",diffuse.R,diffuse.G,diffuse.B"
-                if specular:
-                    OIIO_args += ",specular.R,specular.G,specular.B"
-                if albedo:
-                    OIIO_args += ",albedo.R,albedo.G,albedo.B"
-                if position:
-                    OIIO_args += ",P.x,P.y,P.z"
-                if uv:
-                    OIIO_args += ",uv.R,uv.G,uv.B"
-                if depth:
-                    OIIO_args += ",zfiltered.Z"
-                if crypto_materials:
-                    OIIO_args += ',CryptoMaterials00.R,CryptoMaterials00.G,CryptoMaterials00.B,CryptoMaterials00.A,CryptoMaterials01.R,CryptoMaterials01.G,CryptoMaterials01.B,CryptoMaterials01.A,CryptoMaterials02.R,CryptoMaterials02.G,CryptoMaterials02.B,CryptoMaterials02.A'
-                if crypto_primitives:
-                    OIIO_args += ',CryptoPrimitives00.R,CryptoPrimitives00.G,CryptoPrimitives00.B,CryptoPrimitives00.A,CryptoPrimitives01.R,CryptoPrimitives01.G,CryptoPrimitives01.B,CryptoPrimitives01.A,CryptoPrimitives02.R,CryptoPrimitives02.G,CryptoPrimitives02.B,CryptoPrimitives02.A'
-                if normals:
-                    OIIO_args += ",normal.x,normal.y,normal.z"
-                OIIO_args += r' -o ' + output_path
-
-                # Store passdict in instance data for later use
-                instance.data["passdict"] = passdict
-
-            elif not OIIO_args:
-                # DEFAULT SUBMISSION (when include_aovs is False)
-                OIIO_args += denoised_path
-                OIIO_args += r" --ch Beauty.R,Beauty.G,Beauty.B,Alpha,CryptoMaterials.R,CryptoMaterials.G,CryptoMaterials.B, "
-                OIIO_args += renders_path
-                OIIO_args += r' --ch CryptoMaterials00.R,CryptoMaterials00.G,CryptoMaterials00.B,CryptoMaterials00.A,CryptoMaterials01.R,CryptoMaterials01.G,CryptoMaterials01.B,CryptoMaterials01.A,CryptoMaterials02.R,CryptoMaterials02.G,CryptoMaterials02.B,CryptoMaterials02.A  --chappend --chnames R,G,B,A,CryptoMaterials.R,CryptoMaterials.G,CryptoMaterials.B,CryptoMaterials00.R,CryptoMaterials00.G,CryptoMaterials00.B,CryptoMaterials00.A,CryptoMaterials01.R,CryptoMaterials01.G,CryptoMaterials01.B,CryptoMaterials01.A,CryptoMaterials02.R,CryptoMaterials02.G,CryptoMaterials02.B,CryptoMaterials02.A '
-                OIIO_args += r' -o ' + output_path
-            plugin_info = CommandLinePluginInfo(
-                Executable=executable_path,
-                Arguments=OIIO_args,
-                StartupDirectory=dirname,
-                SingleFramesOnly=True,
-                ShellExecute=False,
-                Shell="cmd"  # Each frame is processed independently
-            )
-        else:
-            # Fallback if no files
-            plugin_info = CommandLinePluginInfo(
+        if not files:
+            return asdict(CommandLinePluginInfo(
                 Executable="echo",
                 Arguments="No files to combine",
                 SingleFramesOnly=True,
                 ShellExecute=False,
-                Shell="cmd"
-            )
+                Shell="cmd",
+            ))
 
-        plugin_payload = asdict(plugin_info)
-        return plugin_payload
+        project_settings = instance.context.data["project_settings"]
+        oiio_settings = project_settings.get("luma-denoise", {})
+
+        oiio_root = oiio_settings.get(
+            "oiio_root_path",
+            r"L:\tools\_studio_tools\AYON\AYON-1.3.3-windows"
+            r"\addons_resources\ayon_third_party\oiio_windows_83e412e9",
+        )
+        oiiotool_path = os.path.join(oiio_root, "bin", "oiiotool.exe").replace("\\", "/")
+
+        first_file = files[0]
+        dirname = os.path.dirname(first_file).replace("\\", "/")
+        filename = os.path.basename(first_file)
+        shot_name = filename.split('.')[0]
+        extension = filename.split('.')[-1]
+
+        renders_path = f"{dirname}/{shot_name}.<STARTFRAME%4>.{extension}"
+        output_subdirectory = oiio_settings.get("output_subdirectory", "combined")
+        output_path = f"{dirname}/{output_subdirectory}/{shot_name}.<STARTFRAME%4>.{extension}"
+
+        denoise_enabled = instance.data.get("denoise", False)
+        denoise_ran = denoise_enabled and "denoise_job_id" in instance.data
+
+        if denoise_ran:
+            denoised_path = f"{dirname}/denoised/{shot_name}.<STARTFRAME%4>.{extension}"
+            rename_pairs_cfg = oiio_settings.get(
+                "beauty_rename_map_denoised", DEFAULT_RENAME_DENOISED)
+        else:
+            denoised_path = renders_path
+            rename_pairs_cfg = oiio_settings.get(
+                "beauty_rename_map_raw", DEFAULT_RENAME_RAW)
+
+        os.makedirs(os.path.dirname(output_path), exist_ok=True)
+
+        python_exe = oiio_settings.get("python_executable", "python")
+
+        wrapper_template = oiio_settings.get("wrapper_script_path", "")
+        if not wrapper_template:
+            raise RuntimeError(
+                "luma-denoise: 'wrapper_script_path' is not configured. "
+                "Set it in the luma-denoise project settings to the absolute "
+                "path of oiio_combine.py on a shared filesystem accessible "
+                "from all render nodes. Use the {version} token for "
+                "per-version paths, e.g. "
+                "'L:/tools/.../luma_denoise_scripts/{version}/oiio_combine.py'."
+            )
+        wrapper_path = wrapper_template.replace("{version}", _ADDON_VERSION)
+
+        default_excludes = list(DEFAULT_EXCLUDE_PATTERNS)
+        user_excludes = list(oiio_settings.get(
+            "channel_exclude_patterns", default_excludes))
+        # If user hasn't customized, user_excludes == default_excludes — dedupe.
+        if user_excludes == default_excludes:
+            all_excludes = default_excludes
+            num_defaults = len(default_excludes)
+        else:
+            # Pass defaults first, then user. Duplicates are harmless for
+            # filtering; the manifest will correctly label the split.
+            all_excludes = default_excludes + [
+                p for p in user_excludes if p not in default_excludes
+            ]
+            num_defaults = len(default_excludes)
+
+        extra_args = oiio_settings.get("oiiotool_extra_args", "")
+        compression = oiio_settings.get("output_compression", "zips")
+        data_type = oiio_settings.get("output_data_type", "preserve")
+        write_manifest = oiio_settings.get("write_combine_manifest", True)
+        verbose = oiio_settings.get("wrapper_verbose_logging", True)
+
+        parts: list[str] = []
+        parts.append(self._quote(wrapper_path))
+        parts.extend(["--denoised", self._quote(denoised_path)])
+        parts.extend(["--raw", self._quote(renders_path)])
+        parts.extend(["--output", self._quote(output_path)])
+        parts.extend(["--oiiotool", self._quote(oiiotool_path)])
+        for pat in all_excludes:
+            parts.extend(["--exclude", self._quote(pat)])
+        parts.extend(["--num-default-excludes", str(num_defaults)])
+        for pair in rename_pairs_cfg:
+            src = pair.get("source") if isinstance(pair, dict) else getattr(pair, "source", "")
+            dst = pair.get("target") if isinstance(pair, dict) else getattr(pair, "target", "")
+            if src and dst:
+                parts.extend(["--rename", self._quote(f"{src}={dst}")])
+        if extra_args:
+            parts.extend(["--extra-args", self._quote(extra_args)])
+        if compression:
+            parts.extend(["--compression", self._quote(compression)])
+        parts.extend(["--data-type", data_type])
+        if write_manifest:
+            parts.append("--write-manifest")
+        if verbose:
+            parts.append("--verbose")
+
+        arguments = " ".join(parts)
+
+        return asdict(CommandLinePluginInfo(
+            Executable=python_exe,
+            Arguments=arguments,
+            StartupDirectory=None,
+            SingleFramesOnly=True,
+            ShellExecute=False,
+            Shell="cmd",
+        ))
+
+    @staticmethod
+    def _quote(value: str) -> str:
+        """Wrap a value in double quotes if it contains spaces."""
+        value = str(value)
+        if " " in value and not (value.startswith('"') and value.endswith('"')):
+            return f'"{value}"'
+        return value
 
     def process(self, instance):
         self._instance = instance
 
         try:
-            # Check if OIIO combine is enabled in project settings
             project_settings = instance.context.data["project_settings"]
             oiio_settings = project_settings.get("luma-denoise", {})
+
             if not oiio_settings.get("oiio_enabled", True):
                 self.log.info("OIIO combine disabled in project settings, skipping.")
                 return
 
-            # Check if denoise is enabled for this instance
-            # First check instance.data (set by collect_render_denoise from ayon-houdini)
-            # Fall back to project settings if not set
-            denoise_enabled = instance.data.get("denoise")
-            if denoise_enabled is None:
-                # If not set by collector, check project settings default
-                project_settings = instance.context.data["project_settings"]
-                denoise_settings = project_settings.get("luma-denoise", {})
-                denoise_enabled = denoise_settings.get("denoise_enabled", True)
-
-            if not denoise_enabled:
-                self.log.info("Denoise is disabled for this instance, skipping OIIO combine.")
-                return
-
-            # Ensure we have files to combine
             if not instance.data.get("files"):
                 self.log.warning("No files found for OIIO combine.")
                 return
 
-            # Check for denoising completion - look for denoise job ID in instance data
-            denoise_job_id = None
-            if "denoise_job_id" in instance.data:
-                denoise_job_id = instance.data["denoise_job_id"]
+            denoise_job_id = instance.data.get("denoise_job_id")
+            run_when_no_denoise = oiio_settings.get("run_when_denoise_disabled", False)
+
+            if denoise_job_id:
+                dependency_job_id = denoise_job_id
+                self.log.info(
+                    f"OIIO combine depends on denoise job: {denoise_job_id}")
             else:
-                self.log.warning("Could not find denoise job ID. Skipping OIIO combine submission.")
-                return
+                if not run_when_no_denoise:
+                    self.log.info(
+                        "Denoise did not run and run_when_denoise_disabled is False — "
+                        "skipping OIIO combine.")
+                    return
 
-            # Set up our combine job with dependency on the denoise job
-            context = instance.context
+                render_job_id = None
+                if "deadlineSubmissionJob" in instance.data:
+                    submission_job = instance.data["deadlineSubmissionJob"]
+                    if isinstance(submission_job, dict) and "_id" in submission_job:
+                        render_job_id = submission_job["_id"]
+                    elif hasattr(submission_job, '_id'):
+                        render_job_id = submission_job._id
+
+                if not render_job_id:
+                    self.log.warning(
+                        "No denoise or render job ID found. Skipping OIIO combine.")
+                    return
+
+                dependency_job_id = render_job_id
+                self.log.info(
+                    f"OIIO combine depends on render job: {render_job_id} "
+                    "(pass-through, no denoise)")
+
             self._deadline_url = instance.data["deadline"]["url"]
-
             assert self._deadline_url, "Requires Deadline Webservice URL"
 
-            # Get generic job info and customize for combining
             job_info = self.get_generic_job_info(instance)
-            self.job_info = self.get_job_info(job_info=deepcopy(job_info), dependency_job_ids=[denoise_job_id])
+            self.job_info = self.get_job_info(
+                job_info=deepcopy(job_info),
+                dependency_job_ids=[dependency_job_id])
 
-            # Set up plugin info for combining
             self.plugin_info = self.get_plugin_info()
             self.aux_files = self.get_aux_files()
 
-            # Apply any additional plugin info data
             plugin_info_data = instance.data["deadline"]["plugin_info_data"]
             if plugin_info_data:
                 self.apply_additional_plugin_info(plugin_info_data)
 
-            # Submit the combine job
             job_id = self.process_submission()
-            self.log.info(f"Submitted OIIO combine job to Deadline: {job_id} (depends on denoise job {denoise_job_id})")
+            self.log.info(
+                f"Submitted OIIO combine job to Deadline: {job_id} "
+                f"(depends on {dependency_job_id})")
 
-            # Store the OIIO combine job ID for downstream dependencies (e.g., review extraction)
             instance.data["oiio_combine_job_id"] = job_id
 
-            # Store output directory for unified publisher
             output_dir = os.path.dirname(instance.data["files"][0])
             instance.data["outputDir"] = output_dir
             instance.data["toBeRenderedOn"] = "deadline"

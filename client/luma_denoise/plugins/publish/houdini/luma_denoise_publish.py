@@ -150,8 +150,7 @@ class LumaDenoiseUsdRender(
             else:
                 self.log.debug("Less than 8 files detected, using single-frame denoising.")
             # Check for large image to enable tiled denoising for pcs with less than 96GB RAM
-            # TODO: Make this configurable in settings
-            if self.detectlargeimage(instance):
+            if self.detectlargeimage(instance, denoise_settings):
                 self.log.info("Large image detected, enabling tiled denoising.")
                 args += ' --tiles {} {} '.format(str(tile_amntx),str(tile_amnty))
             args += r' -o ' + os.path.join(dirname, 'denoised').replace("\\", "/")
@@ -322,12 +321,17 @@ class LumaDenoiseUsdRender(
         return max(count, 1)
 
     @classmethod
-    def detectlargeimage(self,instance):
+    def detectlargeimage(self, instance, denoise_settings=None):
         # Import Houdini modules only when this method is called
         import hou
         from pxr import Usd, UsdRender
 
-        # Get render resolution and pixel aspect ratio from USD stage
+        # Read tiled-denoise threshold from settings (default 2048 if missing).
+        threshold = 2048
+        if denoise_settings:
+            threshold = int(
+                denoise_settings.get("tiled_denoise_threshold", 2048))
+
         rop_node = hou.node(instance.data["instance_node"])
         lop_node: hou.LopNode = get_usd_rop_loppath(rop_node)
         if not lop_node:
@@ -341,35 +345,30 @@ class LumaDenoiseUsdRender(
         if not render_settings:
             return False
 
-        invalid = []
-
-        # Each render product can have different resolution set if explicitly
-        # overridden. If not set, it will use the resolution from the render
-        # settings.
+        # Each render product can have its own resolution override. If any
+        # of (render settings default, per-product overrides) exceeds the
+        # threshold, enable tiled denoising.
         sample_time = Usd.TimeCode.EarliestTime()
 
-        # Get all resolution and pixel aspect attributes to validate
         resolution_attributes = [render_settings.GetResolutionAttr()]
-        pixel_aspect_attributes = [render_settings.GetPixelAspectRatioAttr()]
         for product in self.iter_render_products(render_settings, stage):
             resolution_attr = product.GetResolutionAttr()
             if resolution_attr.HasAuthoredValue():
                 resolution_attributes.append(resolution_attr)
 
-            pixel_aspect_attr = product.GetPixelAspectRatioAttr()
-            if pixel_aspect_attr.HasAuthoredValue():
-                pixel_aspect_attributes.append(pixel_aspect_attr)
-
-        # Validate resolution and pixel aspect ratio
-        # width, height, pixel_aspect = resolution_attributes
-          # Get and print the actual resolution values
         for res_attr in resolution_attributes:
             resolution = res_attr.Get(sample_time)
-            self.log.info(f"Resolution: {resolution}")
-        # self.log.debug(f"Width: {width}, Height: {height}")
-        if resolution[0] >= 2048 or resolution[1] >= 2048:
-            return True
-        # return False
+            if resolution is None:
+                continue
+            self.log.info(
+                f"Resolution: {resolution} (threshold: {threshold}px)")
+            if resolution[0] >= threshold or resolution[1] >= threshold:
+                self.log.info(
+                    f"Resolution {resolution} meets or exceeds tiled denoise "
+                    f"threshold ({threshold}px) - enabling tiled denoise.")
+                return True
+
+        return False
 
     @classmethod
     def get_expected_resolution(self, instance):
