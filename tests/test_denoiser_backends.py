@@ -204,3 +204,16 @@ def test_oidn_validate_requires_guide_channels():
     bad = {"oidn": dict(OIDN_SETTINGS["oidn"], albedo_channel="")}
     with pytest.raises(RuntimeError, match="albedo_channel"):
         backend.validate(make_instance(), bad)
+
+
+import denoisers  # noqa: E402
+
+
+def test_registry_returns_backend_instances():
+    assert denoisers.get_denoiser_backend("renderman").name == "renderman"
+    assert denoisers.get_denoiser_backend("oidn").name == "oidn"
+
+
+def test_registry_unknown_name_raises_with_known_list():
+    with pytest.raises(RuntimeError, match="oidn"):
+        denoisers.get_denoiser_backend("optix")
