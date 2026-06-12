@@ -29,7 +29,7 @@ python create_package.py --only-client -o /path/to/output
 
 Output goes to `package/luma-denoise-{version}.zip`. Upload via AYON server UI or `ayon_api`.
 
-There is no test suite, linter, or CI pipeline. Python target is 3.9 (see `.python-version`).
+Run tests with `python -m pytest tests -v` (no linter or CI pipeline). Python target is 3.9 (see `.python-version`).
 
 ## Version Management
 
@@ -59,7 +59,7 @@ All plugins live in `client/luma_denoise/plugins/publish/houdini/` and run durin
 | Collector +0.49 | `CollectBackupAyonParms` | Backs up current AYON parms to HDA userData |
 | Validator | `ValidateLumaHda` | Reads HDA parms (engine, legacyexr, autocrop, procedurals, denoise) and stores in instance.data |
 | Integrator -0.02 | `InjectHuskParameters` | Builds `plugin_info_data` dict (Engine, AllowedProcedurals, Autocrop, ExrMode) for Deadline |
-| Integrator +0.1 | `LumaDenoiseUsdRender` | Submits Pixar denoise job to Deadline (depends on render job). Stores `denoise_job_id` |
+| Integrator +0.1 | `LumaDenoiseUsdRender` | Submits denoise job (backend from `denoiser` setting: RenderMan or OIDN) to Deadline (depends on render job). Stores `denoise_job_id` |
 | Integrator +0.11 | `ExtractOiioCombine` | Submits OIIO combine job to Deadline (depends on denoise or render job). Stores `oiio_combine_job_id` |
 
 ### Deadline Job Dependency Chain
@@ -71,6 +71,23 @@ Render Job (from ayon-deadline)
 ```
 
 Both `LumaDenoiseUsdRender` and `ExtractOiioCombine` extend `abstract_submit_deadline.AbstractSubmitDeadline` from `ayon-deadline` and use the Deadline `CommandLine` plugin.
+
+### Denoiser Backends
+
+The denoise step is abstracted behind `client/luma_denoise/denoisers/`
+(`DenoiserBackend` strategy classes, selected by the `denoiser` project
+setting). Each backend runs a standalone wrapper script from
+`client/luma_denoise/scripts/` on the Deadline worker:
+
+- `renderman` — `renderman_denoise.py` wraps Pixar `denoise_batch`
+- `oidn` — `oidn_denoise.py` extracts beauty/albedo/normal via oiiotool and
+  runs `oidnDenoise` (albedo + normal guide AOVs are REQUIRED in the render)
+
+Both wrappers write a `<seq>.denoise.json` sidecar next to the denoised
+frames; `oiio_combine.py` reads it for the beauty rename map (falling back
+to the `beauty_rename_map_denoised` setting when absent). Wrapper scripts
+deploy to a shared filesystem; per-backend `wrapper_script_path` settings
+locate them ({version} token supported).
 
 ### Launcher Actions (`client/luma_denoise/plugins/actions/`)
 
@@ -84,6 +101,7 @@ Both `LumaDenoiseUsdRender` and `ExtractOiioCombine` extend `abstract_submit_dea
 - `instance.data["deadlineSubmissionJob"]["_id"]` — render job ID (set by ayon-deadline)
 - `instance.data["denoise_job_id"]` — denoise Deadline job ID (set by `LumaDenoiseUsdRender`)
 - `instance.data["oiio_combine_job_id"]` — combine Deadline job ID (set by `ExtractOiioCombine`)
+- `instance.data["denoise_backend"]` — "renderman" or "oidn", set by `LumaDenoiseUsdRender`
 - `instance.data["passdict"]` — AOV pass dictionary for OIIO combining
 
 ### OIIO Combine: Two Modes
