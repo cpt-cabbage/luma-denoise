@@ -1,5 +1,6 @@
 """Unit tests for oiio_combine wrapper script pure functions."""
 
+import json
 import sys
 from pathlib import Path
 
@@ -564,6 +565,76 @@ def test_main_pass_through_when_denoised_equals_raw(monkeypatch, tmp_path):
     assert "--chnames" in argv
 
     sidecar = tmp_path / "combined" / "shot.combine.json"
-    import json
     m = json.loads(sidecar.read_text())
     assert m["pass_through"] is True
+
+
+# --- denoise manifest reading -------------------------------------------
+
+
+def test_denoise_sidecar_path_strips_frame_token():
+    p = oiio_combine._denoise_sidecar_path("/d/denoised/shot.1001.exr")
+    assert str(p).replace("\\", "/") == "/d/denoised/shot.denoise.json"
+
+
+def test_load_denoise_manifest_missing_returns_none(tmp_path):
+    result = oiio_combine.load_denoise_manifest(
+        str(tmp_path / "shot.1001.exr"))
+    assert result is None
+
+
+def test_load_denoise_manifest_reads_sidecar(tmp_path):
+    sidecar = tmp_path / "shot.denoise.json"
+    sidecar.write_text(json.dumps({
+        "denoiser": "oidn",
+        "beauty_channel_map": {"beauty.r": "R"},
+    }))
+    result = oiio_combine.load_denoise_manifest(str(tmp_path / "shot.1001.exr"))
+    assert result["denoiser"] == "oidn"
+    assert result["beauty_channel_map"] == {"beauty.r": "R"}
+
+
+def test_load_denoise_manifest_corrupt_returns_none(tmp_path, capsys):
+    (tmp_path / "shot.denoise.json").write_text("{not json")
+    result = oiio_combine.load_denoise_manifest(str(tmp_path / "shot.1001.exr"))
+    assert result is None
+    assert "WARN" in capsys.readouterr().err
+
+
+def test_resolve_rename_map_prefers_manifest(tmp_path):
+    sidecar = tmp_path / "shot.denoise.json"
+    sidecar.write_text(json.dumps({
+        "denoiser": "oidn",
+        "beauty_channel_map": {"beauty.r": "R", "a.Z": "A"},
+    }))
+    rename_map = oiio_combine.resolve_rename_map(
+        denoised_path=str(tmp_path / "shot.1001.exr"),
+        cli_rename_pairs=["Ci.r=R", "Ci.g=G"],
+        pass_through=False,
+        verbose=False,
+    )
+    assert rename_map == {"beauty.r": "R", "a.Z": "A"}
+
+
+def test_resolve_rename_map_falls_back_to_cli(tmp_path):
+    rename_map = oiio_combine.resolve_rename_map(
+        denoised_path=str(tmp_path / "shot.1001.exr"),
+        cli_rename_pairs=["Ci.r=R", "Ci.g=G"],
+        pass_through=False,
+        verbose=False,
+    )
+    assert rename_map == {"Ci.r": "R", "Ci.g": "G"}
+
+
+def test_resolve_rename_map_pass_through_ignores_manifest(tmp_path):
+    sidecar = tmp_path / "shot.denoise.json"
+    sidecar.write_text(json.dumps({
+        "beauty_channel_map": {"beauty.r": "R"},
+    }))
+    rename_map = oiio_combine.resolve_rename_map(
+        denoised_path=str(tmp_path / "shot.1001.exr"),
+        cli_rename_pairs=["beauty.r=R"],
+        pass_through=True,
+        verbose=False,
+    )
+    assert rename_map == {"beauty.r": "R"}

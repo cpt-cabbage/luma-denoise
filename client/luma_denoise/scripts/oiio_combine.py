@@ -313,6 +313,58 @@ def _sequence_sidecar_path(output_path: str) -> Path:
     return p.parent / f"{base}.combine.json"
 
 
+def _denoise_sidecar_path(denoised_path: str) -> Path:
+    """Derive the denoise-manifest path from a per-frame denoised path.
+
+    '<dir>/<name>.<NNNN>.<ext>' -> '<dir>/<name>.denoise.json'
+    Written by the denoise wrappers (renderman_denoise.py / oidn_denoise.py).
+    """
+    p = Path(denoised_path)
+    name = p.name
+    m = _FRAME_RE.search(name)
+    base = name[:m.start()] if m else p.stem
+    return p.parent / f"{base}.denoise.json"
+
+
+def load_denoise_manifest(denoised_path: str) -> dict | None:
+    """Load the denoise sidecar next to the denoised frames, if present.
+
+    Returns None when the sidecar is missing or unreadable (warned to
+    stderr) - the caller falls back to the CLI rename pairs.
+    """
+    sidecar = _denoise_sidecar_path(denoised_path)
+    if not sidecar.is_file():
+        return None
+    try:
+        return json.loads(sidecar.read_text())
+    except Exception as e:
+        print(f"[oiio_combine] WARN: unreadable denoise manifest "
+              f"{sidecar}: {e}", file=sys.stderr)
+        return None
+
+
+def resolve_rename_map(denoised_path: str, cli_rename_pairs: list[str],
+                       pass_through: bool, verbose: bool) -> dict[str, str]:
+    """Resolve the beauty rename map: denoise manifest wins over CLI pairs.
+
+    The manifest is authoritative because the denoise wrapper knows exactly
+    which channel names it wrote; the CLI pairs come from static settings
+    and remain as the fallback (old renders, pass-through mode).
+    """
+    cli_map = parse_rename_pairs(cli_rename_pairs)
+    if pass_through:
+        return cli_map
+    manifest = load_denoise_manifest(denoised_path)
+    if manifest:
+        manifest_map = manifest.get("beauty_channel_map") or {}
+        if manifest_map:
+            if verbose:
+                print(f"[oiio_combine] rename map from denoise manifest "
+                      f"({manifest.get('denoiser', '?')}): {manifest_map}")
+            return {str(k): str(v) for k, v in manifest_map.items()}
+    return cli_map
+
+
 def build_manifest(
     denoised_path: str,
     raw_path: str,
@@ -423,7 +475,12 @@ def _run(args: argparse.Namespace) -> int:
         print(f"[oiio_combine] extras   ({len(extra_channels)}): {extra_channels}")
 
     # Resolve rename map.
-    rename_map = parse_rename_pairs(args.rename)
+    rename_map = resolve_rename_map(
+        denoised_path=args.denoised,
+        cli_rename_pairs=args.rename,
+        pass_through=pass_through,
+        verbose=args.verbose,
+    )
     final_channels = list(denoised_channels) + list(extra_channels)
     chnames_override = resolve_chnames(final_channels, rename_map)
     if chnames_override is None and rename_map:

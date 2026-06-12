@@ -42,6 +42,111 @@ class ChannelRenamePair(BaseSettingsModel):
     )
 
 
+def _denoiser_enum():
+    return [
+        {"value": "renderman", "label": "Pixar RenderMan (denoise_batch)"},
+        {"value": "oidn", "label": "Intel Open Image Denoise (OIDN)"},
+    ]
+
+
+class RendermanDenoiserSettings(BaseSettingsModel):
+    """Pixar RenderMan denoise_batch backend."""
+
+    rmantree_path: str = SettingsField(
+        "/opt/pixar/RenderManProServer-26.3",
+        title="RenderMan Root Path",
+        description="Path to RMANTREE on the Deadline workers.",
+    )
+
+    denoise_exe: str = SettingsField(
+        "denoise_batch",
+        title="Denoiser Executable Name",
+        description="Name of the RenderMan denoiser executable in <RMANTREE>/bin.",
+    )
+
+    pixar_license: str = SettingsField(
+        "9010@192.168.35.28",
+        title="RenderMan License Server",
+        description="RenderMan license server or file location.",
+    )
+
+    tiled_denoise_threshold: int = SettingsField(
+        2048,
+        title="Tiled Denoise Resolution Threshold",
+        description=(
+            "Minimum resolution (width or height) at which tiled denoising "
+            "is enabled. Images with either dimension at or above this value "
+            "will be denoised in tiles to reduce memory usage."
+        ),
+    )
+
+    wrapper_script_path: str = SettingsField(
+        "",
+        title="Wrapper Script Path",
+        description=(
+            "Absolute path to renderman_denoise.py on a shared filesystem "
+            "accessible from every Deadline render node. Supports the "
+            "{version} token - substituted at submission time with the "
+            "luma-denoise addon version. MUST be configured for the "
+            "RenderMan denoise step to submit."
+        ),
+    )
+
+
+class OidnDenoiserSettings(BaseSettingsModel):
+    """Intel Open Image Denoise backend."""
+
+    oidn_root_path: str = SettingsField(
+        "/opt/oidn",
+        title="OIDN Root Path",
+        description="Path to the OIDN install root on the Deadline workers.",
+    )
+
+    denoise_exe: str = SettingsField(
+        "oidnDenoise",
+        title="Denoiser Executable Name",
+        description="Name of the OIDN executable in <root>/bin.",
+    )
+
+    wrapper_script_path: str = SettingsField(
+        "",
+        title="Wrapper Script Path",
+        description=(
+            "Absolute path to oidn_denoise.py on a shared filesystem "
+            "accessible from every Deadline render node. Supports the "
+            "{version} token. MUST be configured for the OIDN denoise "
+            "step to submit."
+        ),
+    )
+
+    beauty_channel: str = SettingsField(
+        "beauty",
+        title="Beauty Layer Name",
+        description=(
+            "Layer name of the beauty channels in the raw render EXR "
+            "(e.g. 'beauty' for beauty.r/beauty.g/beauty.b)."
+        ),
+    )
+
+    albedo_channel: str = SettingsField(
+        "albedo",
+        title="Albedo Guide Layer Name",
+        description=(
+            "Layer name of the albedo guide AOV. REQUIRED: the OIDN "
+            "denoise job fails if this layer is missing from the render."
+        ),
+    )
+
+    normal_channel: str = SettingsField(
+        "N",
+        title="Normal Guide Layer Name",
+        description=(
+            "Layer name of the normal guide AOV. REQUIRED: the OIDN "
+            "denoise job fails if this layer is missing from the render."
+        ),
+    )
+
+
 class LumaDenoiseSettings(BaseSettingsModel):
     """
     """
@@ -69,32 +174,23 @@ class LumaDenoiseSettings(BaseSettingsModel):
         description="Group to use for denoising",
     )
 
-    denoise_rmantree_path: str = SettingsField(
-        "/opt/pixar/RenderManProServer-26.3",
-        title="Renderman Root Path",
-        description="Path to RMAN ROOT",
+    denoiser: str = SettingsField(
+        "renderman",
+        title="Denoiser",
+        description="Which denoiser backend processes the rendered EXRs.",
+        enum_resolver=_denoiser_enum,
     )
 
-    denoise_exe: str = SettingsField(
-        "denoise_batch",
-        title="Renderman Denoise Name",
-        description="Name of the denoiser executable",
+    renderman: RendermanDenoiserSettings = SettingsField(
+        default_factory=RendermanDenoiserSettings,
+        title="RenderMan Denoiser",
+        description="Settings for the Pixar RenderMan denoise_batch backend.",
     )
 
-    denoise_pixar_lic: str = SettingsField(
-        "9010@192.168.35.28",
-        title="Renderman License Server",
-        description="Renderman license server or file location",
-    )
-
-    tiled_denoise_threshold: int = SettingsField(
-        2048,
-        title="Tiled Denoise Resolution Threshold",
-        description=(
-            "Minimum resolution (width or height) at which tiled denoising "
-            "is enabled. Images with either dimension at or above this value "
-            "will be denoised in tiles to reduce memory usage."
-        ),
+    oidn: OidnDenoiserSettings = SettingsField(
+        default_factory=OidnDenoiserSettings,
+        title="OIDN Denoiser",
+        description="Settings for the Intel Open Image Denoise backend.",
     )
 
     # OIIO combine settings - always enabled by default
