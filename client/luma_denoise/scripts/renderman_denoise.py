@@ -60,6 +60,11 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
                         dest="addon_version",
                         help="luma-denoise addon version, recorded in the manifest.")
     parser.add_argument("--verbose", "-v", action="store_true")
+    parser.add_argument("--rename", action="append", default=[],
+                        metavar="SRC=DST",
+                        help="Beauty channel rename pair recorded in the "
+                             "manifest. May be given multiple times. "
+                             "Default: the built-in RenderMan Ci map.")
     return parser.parse_args(argv)
 
 
@@ -79,6 +84,21 @@ def _strip_frame_token(path: str) -> str:
     return _FRAME_RE.sub(lambda m: "." + "#" * len(m.group(1)), path)
 
 
+def parse_rename_pairs(pairs: list) -> dict:
+    """Parse ['src=dst', ...] into a dict; raises ValueError on bad pairs."""
+    out = {}
+    for pair in pairs:
+        if "=" not in pair:
+            raise ValueError(
+                f"Malformed rename pair (expected 'src=dst'): {pair}")
+        src, dst = pair.split("=", 1)
+        src, dst = src.strip(), dst.strip()
+        if not src or not dst:
+            raise ValueError(f"Empty source or target in rename pair: {pair}")
+        out[src] = dst
+    return out
+
+
 def build_manifest(args: argparse.Namespace) -> dict:
     basename = os.path.basename(args.input)
     output_pattern = "/".join(
@@ -88,7 +108,9 @@ def build_manifest(args: argparse.Namespace) -> dict:
         "addon_version": args.addon_version,
         "source_pattern": _strip_frame_token(args.input.replace("\\", "/")),
         "output_pattern": _strip_frame_token(output_pattern),
-        "beauty_channel_map": dict(RENDERMAN_BEAUTY_MAP),
+        "beauty_channel_map": (parse_rename_pairs(args.rename)
+                               if args.rename
+                               else dict(RENDERMAN_BEAUTY_MAP)),
         "frames": [args.frame_start, args.frame_end],
     }
 
@@ -122,6 +144,11 @@ def write_manifest(output_path: str, manifest: dict) -> bool:
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = parse_args(argv)
+    try:
+        parse_rename_pairs(args.rename)
+    except ValueError as exc:
+        print(f"[renderman_denoise] ERROR: {exc}", file=sys.stderr)
+        return 1
     denoise_argv = build_denoise_argv(args)
 
     if args.verbose:

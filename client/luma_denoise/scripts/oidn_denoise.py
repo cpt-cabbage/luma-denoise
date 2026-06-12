@@ -78,6 +78,12 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--keep-temps", action="store_true", dest="keep_temps",
                         help="Keep per-frame temp EXRs for debugging.")
     parser.add_argument("--verbose", "-v", action="store_true")
+    parser.add_argument("--rename", action="append", default=[],
+                        metavar="SRC=DST",
+                        help="Beauty channel rename pair recorded in the "
+                             "manifest. May be given multiple times. "
+                             "Default: derived from the beauty layer channels "
+                             "plus a.Z->A.")
     return parser.parse_args(argv)
 
 
@@ -215,18 +221,36 @@ def _strip_frame_token(path: str) -> str:
     return _FRAME_RE.sub(lambda m: "." + "#" * len(m.group(1)), path)
 
 
+def parse_rename_pairs(pairs: list) -> dict:
+    """Parse ['src=dst', ...] into a dict; raises ValueError on bad pairs."""
+    out = {}
+    for pair in pairs:
+        if "=" not in pair:
+            raise ValueError(
+                f"Malformed rename pair (expected 'src=dst'): {pair}")
+        src, dst = pair.split("=", 1)
+        src, dst = src.strip(), dst.strip()
+        if not src or not dst:
+            raise ValueError(f"Empty source or target in rename pair: {pair}")
+        out[src] = dst
+    return out
+
+
 def build_manifest(args: argparse.Namespace, beauty_channels: list) -> dict:
     basename = os.path.basename(args.input)
     output_pattern = "/".join(
         [args.output_dir.replace("\\", "/").rstrip("/"), basename])
-    beauty_map = {}
-    if len(beauty_channels) >= 3:
-        beauty_map = {
-            beauty_channels[0]: "R",
-            beauty_channels[1]: "G",
-            beauty_channels[2]: "B",
-        }
-    beauty_map.update(DEFAULT_ALPHA_RENAME)
+    if args.rename:
+        beauty_map = parse_rename_pairs(args.rename)
+    else:
+        beauty_map = {}
+        if len(beauty_channels) >= 3:
+            beauty_map = {
+                beauty_channels[0]: "R",
+                beauty_channels[1]: "G",
+                beauty_channels[2]: "B",
+            }
+        beauty_map.update(DEFAULT_ALPHA_RENAME)
     return {
         "denoiser": "oidn",
         "addon_version": args.addon_version,
@@ -286,12 +310,13 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     try:
         return _run(args)
-    except RuntimeError as exc:
+    except (RuntimeError, ValueError) as exc:
         print(f"[oidn_denoise] ERROR: {exc}", file=sys.stderr)
         return 1
 
 
 def _run(args: argparse.Namespace) -> int:
+    parse_rename_pairs(args.rename)
     if args.frame_start > args.frame_end:
         raise RuntimeError(
             f"frame_start ({args.frame_start}) > frame_end "
