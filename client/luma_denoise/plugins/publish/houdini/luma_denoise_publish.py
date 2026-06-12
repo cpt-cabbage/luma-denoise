@@ -6,11 +6,7 @@ import pyblish.api
 from ayon_core.pipeline import AYONPyblishPluginMixin
 from ayon_deadline import abstract_submit_deadline
 
-from ayon_houdini.api import plugin
-from ayon_houdini.api.action import SelectROPAction
-from ayon_houdini.api.usd import (
-    get_usd_rop_loppath,
-    get_usd_render_rop_rendersettings)
+from luma_denoise.denoisers import get_denoiser_backend
 
 @dataclass
 class CommandLinePluginInfo:
@@ -24,10 +20,12 @@ class CommandLinePluginInfo:
 class LumaDenoiseUsdRender(
         abstract_submit_deadline.AbstractSubmitDeadline,
         AYONPyblishPluginMixin):
-    """Run command-line post-processing on USD rendered EXR files after render is complete.
+    """Submit the denoise pass for USD-rendered EXR sequences to Deadline.
 
-    This runs the exr's through Pixar's command line denoiser, generating new exr layers
-    that then get recombined into the final exr's for publish.
+    The denoiser backend (RenderMan denoise_batch or Intel OIDN) is selected
+    by the 'denoiser' luma-denoise project setting. Each backend runs as a
+    Python wrapper script on the worker and writes a <seq>.denoise.json
+    sidecar that the downstream OIIO combine job reads.
     """
 
     label = "Submit Denoise Pass to Deadline"
@@ -51,7 +49,9 @@ class LumaDenoiseUsdRender(
 
         filepath = context.data["currentFile"]
         scenename = os.path.basename(filepath)
-        job_name = "{scene} - {instance} [DENOISE]".format(scene=scenename, instance=instance.name)
+        backend_tag = self._backend.name.upper()
+        job_name = "{scene} - {instance} [DENOISE:{tag}]".format(
+            scene=scenename, instance=instance.name, tag=backend_tag)
         batch_name = f"{scenename}"
 
         job_info.Name = job_name
@@ -91,94 +91,17 @@ class LumaDenoiseUsdRender(
 
     def get_plugin_info(self, job_type=None):
         instance = self._instance
-        files = instance.data["files"]
+        denoise_settings = (
+            instance.context.data["project_settings"]["luma-denoise"])
 
-        # Get denoise settings from project settings
-        project_settings = instance.context.data["project_settings"]
-        denoise_settings = project_settings["luma-denoise"]
-
-        # Build the executable path from settings
-        rman_root = denoise_settings.get("denoise_rmantree_path", "/opt/pixar/RenderManProServer-26.3")
-        denoise_exe_name = denoise_settings.get("denoise_exe", "denoise_batch")
-        executable_path = os.path.join(rman_root, "bin", denoise_exe_name).replace("\\", "/")
-
-        # For denoising, we need to handle per-frame processing
-        # Deadline will substitute frame numbers in the arguments
-        if files:
-            # Use Deadline's frame substitution: <STARTFRAME>, <ENDFRAME>, etc.
-            # For EXR files, typically named like: scene_render.1001.exr
-            first_file = files[0]
-            dirname = os.path.dirname(first_file)
-            basename = os.path.basename(first_file)
-
-            # Extract frame pattern - assuming files follow naming convention
-            # This is a simplified approach - in practice you might need more robust parsing
-            # frame_pattern = basename.replace('.####.exr', '.<STARTFRAME>.exr')
-            # output_pattern = basename.replace('.####.exr', '_denoised.<STARTFRAME>.exr')
-
-            # Build the denoise command arguments using Deadline frame substitution
-            start_frame = instance.data.get("frameStartHandle", 1)
-            end_frame = instance.data.get("frameEndHandle", 1)
-            length = end_frame - start_frame + 1
-
-            # If custom frames are set in the publish window,
-            # use those to determine frame count instead
-            publish_attrs = instance.data.get("publish_attributes", {})
-            jobinfo_attrs = publish_attrs.get("CollectJobInfo", {})
-            use_custom = jobinfo_attrs.get("use_custom_frames", "none")
-            if use_custom in ("custom_only", "reuse_last_version"):
-                custom_frames_str = jobinfo_attrs.get("frames", "")
-                if custom_frames_str:
-                    length = self._count_custom_frames(custom_frames_str)
-                    self.log.debug(
-                        f"Using custom frames count: {length} "
-                        f"(from '{custom_frames_str}')"
-                    )
-
-            # Tile based on resolution
-            resx, resy, pixel_aspect = self.get_expected_resolution(instance)
-            tile_amntx = 2
-            tile_amnty = 2
-
-            args = r' -a 0'
-            args += ' -v'
-            args += ' --clean-alpha'
-            args += ' --progress'
-            if length >= 8:
-                self.log.debug("8 or more files detected, enabling cross-frame denoising.")
-                args += ' -cf'
-            else:
-                self.log.debug("Less than 8 files detected, using single-frame denoising.")
-            # Check for large image to enable tiled denoising for pcs with less than 96GB RAM
-            if self.detectlargeimage(instance, denoise_settings):
-                self.log.info("Large image detected, enabling tiled denoising.")
-                args += ' --tiles {} {} '.format(str(tile_amntx),str(tile_amnty))
-            args += r' -o ' + os.path.join(dirname, 'denoised').replace("\\", "/")
-            args += ' ' + os.path.join(dirname, basename).replace("\\", "/")
-            args += ' ' + str(instance.data.get("frameStartHandle", 1)) + '-' + str(instance.data.get("frameEndHandle", 1))
-
-            # arguments = f'--input "{os.path.join(dirname, frame_pattern)}" --output "{os.path.join(dirname, output_pattern)}"'
-
-            plugin_info = CommandLinePluginInfo(
-                Executable=executable_path,
-                Arguments=args,
-                # StartupDirectory=dirname.replace("\\", "/"),
-                SingleFramesOnly=False,
-                ShellExecute=False,
-                Shell="cmd"  # Each frame is processed independently
-            )
-        else:
-            # Fallback if no files
-            plugin_info = CommandLinePluginInfo(
-                Executable="echo",
-                Arguments="No files to denoise",
-                SingleFramesOnly=False,
-                ShellExecute=False,
-                Shell="cmd" 
-            )
-
-        plugin_payload = asdict(plugin_info)
-        return plugin_payload
+        plugin_info = CommandLinePluginInfo(
+            Executable=self._backend.get_executable(denoise_settings),
+            Arguments=self._backend.get_arguments(instance, denoise_settings),
+            SingleFramesOnly=False,
+            ShellExecute=False,
+            Shell="cmd",
+        )
+        return asdict(plugin_info)
 
     def get_denoise_enabled(self, instance):
         """Consolidate denoise logic: settings checking, publish attributes handling, default value assignment."""
@@ -249,28 +172,23 @@ class LumaDenoiseUsdRender(
 
             assert self._deadline_url, "Requires Deadline Webservice URL"
 
+            # Resolve the denoiser backend from settings and validate config.
+            project_settings = context.data["project_settings"]
+            denoise_settings = project_settings["luma-denoise"]
+            backend_name = denoise_settings.get("denoiser", "renderman")
+            self._backend = get_denoiser_backend(backend_name)
+            self._backend.validate(instance, denoise_settings)
+            instance.data["denoise_backend"] = self._backend.name
+            self.log.info(f"Using denoiser backend: {self._backend.name}")
+
             # Get generic job info and customize for denoising
             job_info = self.get_generic_job_info(instance)
             self.job_info = self.get_job_info(job_info=deepcopy(job_info), dependency_job_ids=[render_job_id])
 
-            # Get project settings for denoise configuration
-            project_settings = context.data["project_settings"]
-            denoise_settings = project_settings["luma-denoise"]
-
-            # Add Pixar license environment variable from settings
-            pixar_license = denoise_settings.get("denoise_pixar_lic", "")
-            if pixar_license:
-                self.job_info.EnvironmentKeyValue["PIXAR_LICENSE_FILE"] = pixar_license
-
-            # Add PATH environment variable from settings
-            rmPATH = denoise_settings.get("denoise_rmantree_path", "") + R"/bin"
-            if rmPATH:
-                self.job_info.EnvironmentKeyValue["PATH"] = rmPATH
-
-            # Add RMANTREE environment variable from settings
-            rmTREE = denoise_settings.get("denoise_rmantree_path", "")
-            if rmTREE:
-                self.job_info.EnvironmentKeyValue["RMANTREE"] = rmTREE
+            # Backend-specific job environment (license, PATH, etc.).
+            for key, value in self._backend.get_environment(
+                    denoise_settings).items():
+                self.job_info.EnvironmentKeyValue[key] = value
 
             # Set up plugin info for denoising
             self.plugin_info = self.get_plugin_info()
@@ -300,111 +218,3 @@ class LumaDenoiseUsdRender(
             import traceback
             self.log.error(traceback.format_exc())
             raise
-    
-    @staticmethod
-    def _count_custom_frames(frames_str):
-        """Count individual frames from a custom frames string.
-
-        Supports formats like "1001,1003-1006,1010" and returns the
-        total number of frames represented.
-        """
-        count = 0
-        for part in frames_str.replace(" ", "").split(","):
-            if "-" in part:
-                tokens = part.split("-", 1)
-                try:
-                    count += int(tokens[1]) - int(tokens[0]) + 1
-                except (ValueError, IndexError):
-                    count += 1
-            elif part:
-                count += 1
-        return max(count, 1)
-
-    @classmethod
-    def detectlargeimage(self, instance, denoise_settings=None):
-        # Import Houdini modules only when this method is called
-        import hou
-        from pxr import Usd, UsdRender
-
-        # Read tiled-denoise threshold from settings (default 2048 if missing).
-        threshold = 2048
-        if denoise_settings:
-            threshold = int(
-                denoise_settings.get("tiled_denoise_threshold", 2048))
-
-        rop_node = hou.node(instance.data["instance_node"])
-        lop_node: hou.LopNode = get_usd_rop_loppath(rop_node)
-        if not lop_node:
-            self.log.debug(
-                f"No LOP node found for ROP node: {rop_node.path()}")
-            return False
-
-        stage: Usd.Stage = lop_node.stage()
-        render_settings: UsdRender.Settings = (
-            get_usd_render_rop_rendersettings(rop_node, stage, logger=self.log))
-        if not render_settings:
-            return False
-
-        # Each render product can have its own resolution override. If any
-        # of (render settings default, per-product overrides) exceeds the
-        # threshold, enable tiled denoising.
-        sample_time = Usd.TimeCode.EarliestTime()
-
-        resolution_attributes = [render_settings.GetResolutionAttr()]
-        for product in self.iter_render_products(render_settings, stage):
-            resolution_attr = product.GetResolutionAttr()
-            if resolution_attr.HasAuthoredValue():
-                resolution_attributes.append(resolution_attr)
-
-        for res_attr in resolution_attributes:
-            resolution = res_attr.Get(sample_time)
-            if resolution is None:
-                continue
-            self.log.info(
-                f"Resolution: {resolution} (threshold: {threshold}px)")
-            if resolution[0] >= threshold or resolution[1] >= threshold:
-                self.log.info(
-                    f"Resolution {resolution} meets or exceeds tiled denoise "
-                    f"threshold ({threshold}px) - enabling tiled denoise.")
-                return True
-
-        return False
-
-    @classmethod
-    def get_expected_resolution(self, instance):
-        """Return the expected resolution and pixel aspect ratio for the
-        instance based on the task entity or folder entity."""
-
-        entity = instance.data.get("taskEntity")
-        if not entity:
-            entity = instance.data["folderEntity"]
-
-        attributes = entity["attrib"]
-        width = attributes["resolutionWidth"]
-        height = attributes["resolutionHeight"]
-        pixel_aspect = attributes["pixelAspect"]
-        return int(width), int(height), float(pixel_aspect) 
-    
-    @classmethod
-    def iter_render_products(self, render_settings, stage):
-        """Iterate over all render products in the USD render settings"""
-        # Import USD modules only when this method is called
-        from pxr import UsdRender
-
-        for product_path in render_settings.GetProductsRel().GetTargets():
-            prim = stage.GetPrimAtPath(product_path)
-            if not prim.IsValid():
-                self.log.debug(
-                    f"Render product path is not a valid prim: {product_path}")
-                return
-
-            if prim.IsA(UsdRender.Product):
-                yield UsdRender.Product(prim)
-
-
-
-
-
-
-    
-
