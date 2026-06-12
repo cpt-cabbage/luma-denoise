@@ -33,8 +33,9 @@ class OidnDenoiser(DenoiserBackend):
         oidn_exe = f"{oidn_root}/bin/{exe_name}"
 
         # The extraction tool is the same OIIO install the combine step uses.
-        oiio_root = settings.get("oiio_root_path", "/opt/oiio")
-        oiio_exe = settings.get("oiio_exe", "oiiotool")
+        shared = settings.get("shared", {}) or {}
+        oiio_root = shared.get("oiio_root_path", "/opt/oiio")
+        oiio_exe = shared.get("oiio_exe", "oiiotool")
         oiiotool = f"{oiio_root}/bin/{oiio_exe}"
 
         wrapper_path = self._resolve_wrapper_path(settings)
@@ -51,8 +52,9 @@ class OidnDenoiser(DenoiserBackend):
             "--albedo-channel", quote(oidn_settings.get("albedo_channel", "albedo")),
             "--normal-channel", quote(oidn_settings.get("normal_channel", "N")),
             "--addon-version", ADDON_VERSION,
-            "--verbose",
         ]
+        parts.extend(self.rename_pair_args(settings))
+        parts.append("--verbose")
         return " ".join(parts)
 
     def get_environment(self, settings: dict) -> dict:

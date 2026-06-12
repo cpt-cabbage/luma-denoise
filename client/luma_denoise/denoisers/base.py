@@ -40,9 +40,10 @@ class DenoiserBackend:
         """Executable for the Deadline job — the worker Python.
 
         Both current backends run Python wrapper scripts, so this is the
-        same ``python_executable`` setting the combine wrapper already uses.
+        same ``shared.python_executable`` setting the combine wrapper uses.
         """
-        return settings.get("python_executable", "python")
+        return (settings.get("shared", {}) or {}).get(
+            "python_executable", "python")
 
     def get_arguments(self, instance, settings: dict) -> str:
         """Full Arguments string for the Deadline CommandLine plugin."""
@@ -59,13 +60,14 @@ class DenoiserBackend:
     # -- shared helpers -------------------------------------------------
 
     def _backend_settings(self, settings: dict) -> dict:
-        return settings.get(self.name, {}) or {}
+        denoise_settings = settings.get("denoise", {}) or {}
+        return denoise_settings.get(self.name, {}) or {}
 
     def _resolve_wrapper_path(self, settings: dict) -> str:
         template = self._backend_settings(settings).get("wrapper_script_path", "")
         if not template:
             raise RuntimeError(
-                f"luma-denoise: '{self.name}.wrapper_script_path' is not "
+                f"luma-denoise: 'denoise.{self.name}.wrapper_script_path' is not "
                 f"configured. Set it in the luma-denoise project settings to "
                 f"the absolute path of {self.wrapper_filename or 'the wrapper script'} "
                 "on a shared filesystem accessible from all render nodes. "
@@ -74,3 +76,23 @@ class DenoiserBackend:
                 f"{self.wrapper_filename}'."
             )
         return template.replace("{version}", ADDON_VERSION)
+
+    def rename_pair_args(self, settings: dict) -> list:
+        """Backend's beauty_rename_map as ['--rename', 'SRC=DST', ...].
+
+        The wrapper records these pairs verbatim in the denoise manifest's
+        beauty_channel_map; the combine step consumes them from there.
+        """
+        args = []
+        pairs = self._backend_settings(settings).get(
+            "beauty_rename_map", []) or []
+        for pair in pairs:
+            if isinstance(pair, dict):
+                source = pair.get("source", "")
+                target = pair.get("target", "")
+            else:
+                source = getattr(pair, "source", "")
+                target = getattr(pair, "target", "")
+            if source and target:
+                args.extend(["--rename", quote(f"{source}={target}")])
+        return args

@@ -33,15 +33,15 @@ def test_quote_adds_quotes_only_when_needed():
 
 def test_base_get_executable_uses_python_executable_setting():
     backend = base.DenoiserBackend()
-    assert backend.get_executable({"python_executable": "/py/bin/python3"}) == "/py/bin/python3"
+    assert backend.get_executable({"shared": {"python_executable": "/py/bin/python3"}}) == "/py/bin/python3"
     assert backend.get_executable({}) == "python"
 
 
 def test_base_resolve_wrapper_path_substitutes_version():
     backend = base.DenoiserBackend()
     backend.name = "renderman"
-    settings = {"renderman": {
-        "wrapper_script_path": "L:/scripts/{version}/renderman_denoise.py"}}
+    settings = {"denoise": {"renderman": {
+        "wrapper_script_path": "L:/scripts/{version}/renderman_denoise.py"}}}
     resolved = backend._resolve_wrapper_path(settings)
     assert "{version}" not in resolved
     assert resolved.endswith("/renderman_denoise.py")
@@ -50,21 +50,29 @@ def test_base_resolve_wrapper_path_substitutes_version():
 def test_base_resolve_wrapper_path_empty_raises_actionable_error():
     backend = base.DenoiserBackend()
     backend.name = "renderman"
-    with pytest.raises(RuntimeError, match="wrapper_script_path"):
-        backend._resolve_wrapper_path({"renderman": {"wrapper_script_path": ""}})
+    with pytest.raises(RuntimeError, match="denoise.renderman.wrapper_script_path"):
+        backend._resolve_wrapper_path({"denoise": {"renderman": {"wrapper_script_path": ""}}})
 
 
 from denoisers.renderman import RendermanDenoiser  # noqa: E402
 
 
 RM_SETTINGS = {
-    "python_executable": "/usr/bin/python3",
-    "renderman": {
-        "rmantree_path": "/opt/pixar/RenderManProServer-26.3",
-        "denoise_exe": "denoise_batch",
-        "pixar_license": "9010@192.168.35.28",
-        "tiled_denoise_threshold": 2048,
-        "wrapper_script_path": "L:/scripts/{version}/renderman_denoise.py",
+    "shared": {"python_executable": "/usr/bin/python3",
+               "oiio_root_path": "/opt/oiio", "oiio_exe": "oiiotool"},
+    "denoise": {
+        "denoiser": "renderman",
+        "renderman": {
+            "rmantree_path": "/opt/pixar/RenderManProServer-26.3",
+            "denoise_exe": "denoise_batch",
+            "pixar_license": "9010@192.168.35.28",
+            "tiled_denoise_threshold": 2048,
+            "wrapper_script_path": "L:/scripts/{version}/renderman_denoise.py",
+            "beauty_rename_map": [
+                {"source": "Ci.r", "target": "R"},
+                {"source": "a.Z", "target": "A"},
+            ],
+        },
     },
 }
 
@@ -96,6 +104,8 @@ def test_renderman_arguments_basic(monkeypatch):
     # 100 frames >= 8 -> cross-frame on; not a large image -> no tiles
     assert "--cross-frame" in args
     assert "--tiles" not in args
+    assert "--rename Ci.r=R" in args
+    assert "--rename a.Z=A" in args
 
 
 def test_renderman_arguments_short_range_no_cross_frame(monkeypatch):
@@ -134,8 +144,8 @@ def test_renderman_environment():
 
 def test_renderman_validate_requires_wrapper_path():
     backend = RendermanDenoiser()
-    bad = {"renderman": {"wrapper_script_path": ""}}
-    with pytest.raises(RuntimeError, match="renderman.wrapper_script_path"):
+    bad = {"denoise": {"renderman": {"wrapper_script_path": ""}}}
+    with pytest.raises(RuntimeError, match="denoise.renderman.wrapper_script_path"):
         backend.validate(make_instance(), bad)
 
 
@@ -150,18 +160,31 @@ from denoisers.oidn import OidnDenoiser  # noqa: E402
 
 
 OIDN_SETTINGS = {
-    "python_executable": "/usr/bin/python3",
-    "oiio_root_path": "/opt/oiio",
-    "oiio_exe": "oiiotool",
-    "oidn": {
-        "oidn_root_path": "/opt/oidn",
-        "denoise_exe": "oidnDenoise",
-        "wrapper_script_path": "L:/scripts/{version}/oidn_denoise.py",
-        "beauty_channel": "beauty",
-        "albedo_channel": "albedo",
-        "normal_channel": "N",
+    "shared": {"python_executable": "/usr/bin/python3",
+               "oiio_root_path": "/opt/oiio", "oiio_exe": "oiiotool"},
+    "denoise": {
+        "denoiser": "oidn",
+        "oidn": {
+            "oidn_root_path": "/opt/oidn",
+            "denoise_exe": "oidnDenoise",
+            "wrapper_script_path": "L:/scripts/{version}/oidn_denoise.py",
+            "beauty_channel": "beauty",
+            "albedo_channel": "albedo",
+            "normal_channel": "N",
+            "beauty_rename_map": [
+                {"source": "beauty.r", "target": "R"},
+                {"source": "a.Z", "target": "A"},
+            ],
+        },
     },
 }
+
+
+def _oidn_settings_with(**overrides):
+    import copy
+    settings = copy.deepcopy(OIDN_SETTINGS)
+    settings["denoise"]["oidn"].update(overrides)
+    return settings
 
 
 def test_oidn_name_and_combine_flag():
@@ -184,6 +207,8 @@ def test_oidn_arguments():
     assert "--beauty-channel beauty" in args
     assert "--albedo-channel albedo" in args
     assert "--normal-channel N" in args
+    assert "--rename beauty.r=R" in args
+    assert "--rename a.Z=A" in args
 
 
 def test_oidn_environment_prepends_bin():
@@ -194,14 +219,14 @@ def test_oidn_environment_prepends_bin():
 
 def test_oidn_validate_requires_wrapper_path():
     backend = OidnDenoiser()
-    bad = {"oidn": dict(OIDN_SETTINGS["oidn"], wrapper_script_path="")}
+    bad = _oidn_settings_with(wrapper_script_path="")
     with pytest.raises(RuntimeError, match="oidn.wrapper_script_path"):
         backend.validate(make_instance(), bad)
 
 
 def test_oidn_validate_requires_guide_channels():
     backend = OidnDenoiser()
-    bad = {"oidn": dict(OIDN_SETTINGS["oidn"], albedo_channel="")}
+    bad = _oidn_settings_with(albedo_channel="")
     with pytest.raises(RuntimeError, match="albedo_channel"):
         backend.validate(make_instance(), bad)
 
@@ -217,3 +242,13 @@ def test_registry_returns_backend_instances():
 def test_registry_unknown_name_raises_with_known_list():
     with pytest.raises(RuntimeError, match="oidn"):
         denoisers.get_denoiser_backend("optix")
+
+
+def test_rename_pair_args_skips_incomplete_pairs():
+    backend = RendermanDenoiser()
+    settings = {"denoise": {"renderman": {"beauty_rename_map": [
+        {"source": "Ci.r", "target": "R"},
+        {"source": "", "target": "X"},
+        {"source": "Y", "target": ""},
+    ]}}}
+    assert backend.rename_pair_args(settings) == ["--rename", "Ci.r=R"]
