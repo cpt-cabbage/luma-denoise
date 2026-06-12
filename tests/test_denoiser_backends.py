@@ -144,3 +144,63 @@ def test_count_custom_frames():
     assert count("1001,1003-1006,1010") == 6
     assert count("1001") == 1
     assert count("") == 1
+
+
+from denoisers.oidn import OidnDenoiser  # noqa: E402
+
+
+OIDN_SETTINGS = {
+    "python_executable": "/usr/bin/python3",
+    "oiio_root_path": "/opt/oiio",
+    "oiio_exe": "oiiotool",
+    "oidn": {
+        "oidn_root_path": "/opt/oidn",
+        "denoise_exe": "oidnDenoise",
+        "wrapper_script_path": "L:/scripts/{version}/oidn_denoise.py",
+        "beauty_channel": "beauty",
+        "albedo_channel": "albedo",
+        "normal_channel": "N",
+    },
+}
+
+
+def test_oidn_name_and_combine_flag():
+    backend = OidnDenoiser()
+    assert backend.name == "oidn"
+    assert backend.requires_combine is True
+    assert backend.wrapper_filename == "oidn_denoise.py"
+
+
+def test_oidn_arguments():
+    backend = OidnDenoiser()
+    args = backend.get_arguments(make_instance(), OIDN_SETTINGS)
+    assert args.startswith("L:/scripts/")
+    assert "--oidn-exe /opt/oidn/bin/oidnDenoise" in args
+    assert "--oiiotool /opt/oiio/bin/oiiotool" in args
+    assert "--input /renders/shot/main/shot_main.1001.exr" in args
+    assert "--output-dir /renders/shot/main/denoised" in args
+    assert "--frame-start 1001" in args
+    assert "--frame-end 1100" in args
+    assert "--beauty-channel beauty" in args
+    assert "--albedo-channel albedo" in args
+    assert "--normal-channel N" in args
+
+
+def test_oidn_environment_prepends_bin():
+    backend = OidnDenoiser()
+    env = backend.get_environment(OIDN_SETTINGS)
+    assert env == {"PATH": "/opt/oidn/bin"}
+
+
+def test_oidn_validate_requires_wrapper_path():
+    backend = OidnDenoiser()
+    bad = {"oidn": dict(OIDN_SETTINGS["oidn"], wrapper_script_path="")}
+    with pytest.raises(RuntimeError, match="oidn.wrapper_script_path"):
+        backend.validate(make_instance(), bad)
+
+
+def test_oidn_validate_requires_guide_channels():
+    backend = OidnDenoiser()
+    bad = {"oidn": dict(OIDN_SETTINGS["oidn"], albedo_channel="")}
+    with pytest.raises(RuntimeError, match="albedo_channel"):
+        backend.validate(make_instance(), bad)
