@@ -42,7 +42,7 @@ Single source of truth: `package.py` (`version = "0.0.10"`).
 ### Server Side (`server/`)
 
 - `__init__.py` — `LumaDenoiseAddon(BaseServerAddon)` with `LumaDenoiseSettings` as its settings model. No custom endpoints.
-- `settings.py` — Pydantic settings model exposing all addon configuration to the AYON server UI: denoise toggle, Deadline pools/priorities/groups, RenderMan paths, OIIO paths, AOV selection (diffuse, specular, crypto, normals, etc.), tiled denoise threshold.
+- `settings.py` — Pydantic settings model with three groups: Denoising (denoiser dropdown + per-backend config incl. beauty rename maps), OIIO Combine (combine job + pass-through rename map), Shared Tools (worker python, OIIO paths).
 
 ### Client Side (`client/luma_denoise/`)
 
@@ -85,7 +85,7 @@ setting). Each backend runs a standalone wrapper script from
 
 Both wrappers write a `<seq>.denoise.json` sidecar next to the denoised
 frames; `oiio_combine.py` reads it for the beauty rename map (falling back
-to the `beauty_rename_map_denoised` setting when absent). Wrapper scripts
+to the active backend's `beauty_rename_map` setting when absent). Wrapper scripts
 deploy to a shared filesystem; per-backend `wrapper_script_path` settings
 locate them ({version} token supported).
 
