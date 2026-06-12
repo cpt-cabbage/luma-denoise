@@ -43,6 +43,7 @@ class RendermanDenoiser(DenoiserBackend):
             parts.append("--cross-frame")
         if self.detect_large_image(instance, rm_settings):
             parts.extend(["--tiles", "2", "2"])
+        parts.extend(self.rename_pair_args(settings))
         parts.append("--verbose")
         return " ".join(parts)
 

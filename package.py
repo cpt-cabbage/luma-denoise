@@ -1,6 +1,6 @@
 name = "luma-denoise"
 title = "Luma Denoise"
-version = "0.2.0"
+version = "0.3.0"
 
 client_dir = "luma_denoise"
 

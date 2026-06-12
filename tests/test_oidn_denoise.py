@@ -179,3 +179,21 @@ def test_main_inverted_frame_range_fails(tmp_path, capsys):
     rc = oidn_denoise.main(argv)
     assert rc == 1
     assert "frame_start" in capsys.readouterr().err
+
+
+def test_build_manifest_rename_pairs_override_derivation(tmp_path):
+    argv = _argv(tmp_path) + ["--rename", "beauty.r=red", "--rename", "a.Z=alpha"]
+    args = oidn_denoise.parse_args(argv)
+    manifest = oidn_denoise.build_manifest(
+        args, ["beauty.r", "beauty.g", "beauty.b"])
+    assert manifest["beauty_channel_map"] == {"beauty.r": "red", "a.Z": "alpha"}
+
+
+def test_main_malformed_rename_fails_before_work(tmp_path, monkeypatch, capsys):
+    calls = []
+    monkeypatch.setattr(
+        oidn_denoise.subprocess, "run", lambda *a, **k: calls.append(a))
+    rc = oidn_denoise.main(_argv(tmp_path) + ["--rename", "bad"])
+    assert rc == 1
+    assert calls == []
+    assert "rename" in capsys.readouterr().err

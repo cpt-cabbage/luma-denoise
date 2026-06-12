@@ -121,3 +121,26 @@ def test_main_failure_skips_manifest(tmp_path, monkeypatch):
     ])
     assert rc == 3
     assert not (tmp_path / "denoised" / "shot_main.denoise.json").exists()
+
+
+def test_build_manifest_rename_pairs_override_default():
+    args = _args(extra=["--rename", "Ci.r=red", "--rename", "a.Z=alpha"])
+    manifest = renderman_denoise.build_manifest(args)
+    assert manifest["beauty_channel_map"] == {"Ci.r": "red", "a.Z": "alpha"}
+
+
+def test_main_malformed_rename_fails_before_denoise(tmp_path, monkeypatch):
+    calls = []
+    monkeypatch.setattr(
+        renderman_denoise.subprocess, "run",
+        lambda *a, **k: calls.append(a))
+    rc = renderman_denoise.main([
+        "--denoise-exe", "/opt/pixar/bin/denoise_batch",
+        "--input", str(tmp_path / "shot_main.1001.exr"),
+        "--output-dir", str(tmp_path / "denoised"),
+        "--frame-start", "1001",
+        "--frame-end", "1100",
+        "--rename", "no-equals-sign",
+    ])
+    assert rc == 1
+    assert calls == []

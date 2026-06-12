@@ -76,6 +76,7 @@ class ExtractOiioCombine(
 
         project_settings = context.data["project_settings"]
         oiio_settings = project_settings.get("luma-denoise", {})
+        combine_settings = oiio_settings.get("combine", {}) or {}
 
         filepath = context.data["currentFile"]
         scenename = os.path.basename(filepath)
@@ -86,9 +87,9 @@ class ExtractOiioCombine(
         job_info.Name = job_name
         job_info.BatchName = batch_name
         job_info.Plugin = "CommandLine"
-        job_info.Priority = oiio_settings.get("combine_deadline_priority", 40)
-        job_info.Pool = oiio_settings.get("combine_pool", "luma")
-        job_info.Group = oiio_settings.get("combine_group", "combine_group")
+        job_info.Priority = combine_settings.get("priority", 50)
+        job_info.Pool = combine_settings.get("pool", "default")
+        job_info.Group = combine_settings.get("group", "default")
 
         if dependency_job_ids:
             job_info.JobDependencies = dependency_job_ids
@@ -106,7 +107,7 @@ class ExtractOiioCombine(
             step = instance.data.get("byFrameStep", 1)
             job_info.Frames = f"{int(start_frame)}-{int(end_frame)}x{int(step)}"
 
-        output_subdirectory = oiio_settings.get("output_subdirectory", "combined")
+        output_subdirectory = combine_settings.get("output_subdirectory", "combined")
         if instance.data.get("files"):
             first_file = instance.data["files"][0]
             dirname = os.path.dirname(first_file)
@@ -135,13 +136,17 @@ class ExtractOiioCombine(
 
         project_settings = instance.context.data["project_settings"]
         oiio_settings = project_settings.get("luma-denoise", {})
+        combine_settings = oiio_settings.get("combine", {}) or {}
+        shared_settings = oiio_settings.get("shared", {}) or {}
 
-        oiio_root = oiio_settings.get(
+        oiio_root = shared_settings.get(
             "oiio_root_path",
             r"L:\tools\_studio_tools\AYON\AYON-1.3.3-windows"
             r"\addons_resources\ayon_third_party\oiio_windows_83e412e9",
         )
-        oiiotool_path = os.path.join(oiio_root, "bin", "oiiotool.exe").replace("\\", "/")
+        oiiotool_path = os.path.join(
+            oiio_root, "bin", shared_settings.get("oiio_exe", "oiiotool")
+        ).replace("\\", "/")
 
         first_file = files[0]
         dirname = os.path.dirname(first_file).replace("\\", "/")
@@ -150,7 +155,7 @@ class ExtractOiioCombine(
         extension = filename.split('.')[-1]
 
         renders_path = f"{dirname}/{shot_name}.<STARTFRAME%4>.{extension}"
-        output_subdirectory = oiio_settings.get("output_subdirectory", "combined")
+        output_subdirectory = combine_settings.get("output_subdirectory", "combined")
         output_path = f"{dirname}/{output_subdirectory}/{shot_name}.<STARTFRAME%4>.{extension}"
 
         denoise_enabled = instance.data.get("denoise", False)
@@ -158,21 +163,29 @@ class ExtractOiioCombine(
 
         if denoise_ran:
             denoised_path = f"{dirname}/denoised/{shot_name}.<STARTFRAME%4>.{extension}"
-            rename_pairs_cfg = oiio_settings.get(
-                "beauty_rename_map_denoised", DEFAULT_RENAME_DENOISED)
+            # Fallback rename map (used only when no denoise manifest is
+            # found): the ACTIVE backend's map, so it always matches the
+            # denoiser that actually ran.
+            backend_name = (instance.data.get("denoise_backend")
+                            or oiio_settings.get("denoise", {}).get(
+                                "denoiser", "renderman"))
+            backend_settings = oiio_settings.get("denoise", {}).get(
+                backend_name, {}) or {}
+            rename_pairs_cfg = backend_settings.get(
+                "beauty_rename_map", DEFAULT_RENAME_DENOISED)
         else:
             denoised_path = renders_path
-            rename_pairs_cfg = oiio_settings.get(
+            rename_pairs_cfg = combine_settings.get(
                 "beauty_rename_map_raw", DEFAULT_RENAME_RAW)
 
         os.makedirs(os.path.dirname(output_path), exist_ok=True)
 
-        python_exe = oiio_settings.get("python_executable", "python")
+        python_exe = shared_settings.get("python_executable", "python")
 
-        wrapper_template = oiio_settings.get("wrapper_script_path", "")
+        wrapper_template = combine_settings.get("wrapper_script_path", "")
         if not wrapper_template:
             raise RuntimeError(
-                "luma-denoise: 'wrapper_script_path' is not configured. "
+                "luma-denoise: 'combine.wrapper_script_path' is not configured. "
                 "Set it in the luma-denoise project settings to the absolute "
                 "path of oiio_combine.py on a shared filesystem accessible "
                 "from all render nodes. Use the {version} token for "
@@ -182,7 +195,7 @@ class ExtractOiioCombine(
         wrapper_path = wrapper_template.replace("{version}", _ADDON_VERSION)
 
         default_excludes = list(DEFAULT_EXCLUDE_PATTERNS)
-        user_excludes = list(oiio_settings.get(
+        user_excludes = list(combine_settings.get(
             "channel_exclude_patterns", default_excludes))
         # If user hasn't customized, user_excludes == default_excludes — dedupe.
         if user_excludes == default_excludes:
@@ -196,11 +209,11 @@ class ExtractOiioCombine(
             ]
             num_defaults = len(default_excludes)
 
-        extra_args = oiio_settings.get("oiiotool_extra_args", "")
-        compression = oiio_settings.get("output_compression", "zips")
-        data_type = oiio_settings.get("output_data_type", "preserve")
-        write_manifest = oiio_settings.get("write_combine_manifest", True)
-        verbose = oiio_settings.get("wrapper_verbose_logging", True)
+        extra_args = combine_settings.get("oiiotool_extra_args", "")
+        compression = combine_settings.get("output_compression", "zips")
+        data_type = combine_settings.get("output_data_type", "preserve")
+        write_manifest = combine_settings.get("write_manifest", True)
+        verbose = combine_settings.get("verbose_logging", True)
 
         parts: list[str] = []
         parts.append(self._quote(wrapper_path))
@@ -252,7 +265,7 @@ class ExtractOiioCombine(
             project_settings = instance.context.data["project_settings"]
             oiio_settings = project_settings.get("luma-denoise", {})
 
-            if not oiio_settings.get("oiio_enabled", True):
+            if not oiio_settings.get("combine", {}).get("enabled", True):
                 self.log.info("OIIO combine disabled in project settings, skipping.")
                 return
 
@@ -261,7 +274,7 @@ class ExtractOiioCombine(
                 return
 
             denoise_job_id = instance.data.get("denoise_job_id")
-            run_when_no_denoise = oiio_settings.get("run_when_denoise_disabled", False)
+            run_when_no_denoise = oiio_settings.get("combine", {}).get("run_when_denoise_disabled", False)
 
             if denoise_job_id:
                 dependency_job_id = denoise_job_id
@@ -317,7 +330,7 @@ class ExtractOiioCombine(
             output_dir = os.path.dirname(instance.data["files"][0])
             instance.data["outputDir"] = output_dir
             instance.data["toBeRenderedOn"] = "deadline"
-            instance.data["stagingDir"] = oiio_settings.get("output_subdirectory", "combined")
+            instance.data["stagingDir"] = oiio_settings.get("combine", {}).get("output_subdirectory", "combined")
 
             instance.data["deadline"]["job_info"] = deepcopy(self.job_info)
 

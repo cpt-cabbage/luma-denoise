@@ -49,6 +49,10 @@ def _denoiser_enum():
     ]
 
 
+def _output_data_type_enum():
+    return ["preserve", "float", "half"]
+
+
 class RendermanDenoiserSettings(BaseSettingsModel):
     """Pixar RenderMan denoise_batch backend."""
 
@@ -82,13 +86,29 @@ class RendermanDenoiserSettings(BaseSettingsModel):
 
     wrapper_script_path: str = SettingsField(
         "",
-        title="Wrapper Script Path",
+        title="RenderMan Wrapper Script Path (renderman_denoise.py)",
         description=(
             "Absolute path to renderman_denoise.py on a shared filesystem "
             "accessible from every Deadline render node. Supports the "
             "{version} token - substituted at submission time with the "
             "luma-denoise addon version. MUST be configured for the "
             "RenderMan denoise step to submit."
+        ),
+    )
+
+    beauty_rename_map: list[ChannelRenamePair] = SettingsField(
+        default_factory=lambda: [
+            ChannelRenamePair(source="Ci.r", target="R"),
+            ChannelRenamePair(source="Ci.g", target="G"),
+            ChannelRenamePair(source="Ci.b", target="B"),
+            ChannelRenamePair(source="a.Z", target="A"),
+        ],
+        title="Beauty Rename Map",
+        description=(
+            "How this denoiser's output channels are renamed in the final "
+            "combined EXR (RenderMan Ci/a convention -> Nuke R/G/B/A). "
+            "Recorded in the denoise manifest and consumed by the OIIO "
+            "combine step."
         ),
     )
 
@@ -110,7 +130,7 @@ class OidnDenoiserSettings(BaseSettingsModel):
 
     wrapper_script_path: str = SettingsField(
         "",
-        title="Wrapper Script Path",
+        title="OIDN Wrapper Script Path (oidn_denoise.py)",
         description=(
             "Absolute path to oidn_denoise.py on a shared filesystem "
             "accessible from every Deadline render node. Supports the "
@@ -146,126 +166,123 @@ class OidnDenoiserSettings(BaseSettingsModel):
         ),
     )
 
+    beauty_rename_map: list[ChannelRenamePair] = SettingsField(
+        default_factory=lambda: [
+            ChannelRenamePair(source="beauty.r", target="R"),
+            ChannelRenamePair(source="beauty.g", target="G"),
+            ChannelRenamePair(source="beauty.b", target="B"),
+            ChannelRenamePair(source="a.Z", target="A"),
+        ],
+        title="Beauty Rename Map",
+        description=(
+            "How this denoiser's output channels are renamed in the final "
+            "combined EXR. OIDN output keeps the source beauty layer names. "
+            "Recorded in the denoise manifest and consumed by the OIIO "
+            "combine step."
+        ),
+    )
 
-class LumaDenoiseSettings(BaseSettingsModel):
-    """
-    """
-    denoise_enabled: bool = SettingsField(
+
+class DenoiseSettings(BaseSettingsModel):
+    """The denoise Deadline job, submitted after the render job."""
+
+    enabled: bool = SettingsField(
         False,
         title="Enable Denoising",
-        description="Enable automatic denoising of rendered EXR files",
-    )
-
-    denoise_deadline_priority: int = SettingsField(
-        50,
-        title="Priority",
-        description="Deadline job priority",
-    )
-
-    denoise_pool: str = SettingsField(
-        "luma",
-        title="Pool",
-        description="Pool to use for denoising",
-    )
-
-    denoise_group: str = SettingsField(
-        "denoise_group",
-        title="Group",
-        description="Group to use for denoising",
+        description="Enable automatic denoising of rendered EXR files.",
     )
 
     denoiser: str = SettingsField(
         "renderman",
         title="Denoiser",
-        description="Which denoiser backend processes the rendered EXRs.",
+        description=(
+            "Which denoiser backend processes the rendered EXRs. Configure "
+            "the matching backend group below."
+        ),
         enum_resolver=_denoiser_enum,
+    )
+
+    priority: int = SettingsField(
+        50,
+        title="Deadline Priority",
+        description="Priority of the denoise Deadline job.",
+    )
+
+    pool: str = SettingsField(
+        "luma",
+        title="Deadline Pool",
+        description="Pool of the denoise Deadline job.",
+    )
+
+    group: str = SettingsField(
+        "denoise_group",
+        title="Deadline Group",
+        description="Group of the denoise Deadline job.",
     )
 
     renderman: RendermanDenoiserSettings = SettingsField(
         default_factory=RendermanDenoiserSettings,
-        title="RenderMan Denoiser",
-        description="Settings for the Pixar RenderMan denoise_batch backend.",
+        title="RenderMan Backend",
+        description="Used when Denoiser is set to Pixar RenderMan.",
     )
 
     oidn: OidnDenoiserSettings = SettingsField(
         default_factory=OidnDenoiserSettings,
-        title="OIDN Denoiser",
-        description="Settings for the Intel Open Image Denoise backend.",
+        title="OIDN Backend",
+        description="Used when Denoiser is set to Intel Open Image Denoise.",
     )
 
-    # OIIO combine settings - always enabled by default
-    oiio_enabled: bool = SettingsField(
+
+class CombineSettings(BaseSettingsModel):
+    """The OIIO combine Deadline job, submitted after the denoise job."""
+
+    enabled: bool = SettingsField(
         True,
         title="Enable OIIO Combine",
-        description="Enable OIIO combine processing (always enabled)",
-    )
-
-    oiio_root_path: str = SettingsField(
-        "/opt/oiio",
-        title="OIIO Root Path",
-        description="Path to OIIO installation root",
-    )
-
-    oiio_exe: str = SettingsField(
-        "oiiotool",
-        title="OIIO Executable Name",
-        description="Name of the OIIO executable",
-    )
-
-    combine_deadline_priority: int = SettingsField(
-        50,
-        title="OIIO Combine Deadline Priority",
-        description="Deadline job priority for OIIO combine",
-    )
-
-    combine_pool: str = SettingsField(
-        "default",
-        title="OIIO Combine Pool",
-        description="Deadline pool for OIIO combine jobs",
-    )
-
-    combine_group: str = SettingsField(
-        "default",
-        title="OIIO Combine Group",
-        description="Deadline group for OIIO combine jobs",
-    )
-
-    # --- Wrapper-script tunables ---
-    wrapper_script_path: str = SettingsField(
-        "",
-        title="Wrapper Script Path",
         description=(
-            "Absolute path to oiio_combine.py on a shared filesystem "
-            "accessible from both the submitting machine AND every Deadline "
-            "render node. Supports the {version} token — substituted at "
-            "submission time with the luma-denoise addon version, so the "
-            "same template can survive addon upgrades. "
-            "Example: 'L:/tools/.../luma_denoise_scripts/{version}/oiio_combine.py'. "
-            "MUST be configured for the OIIO combine step to submit — leaving "
-            "this empty will raise a clear error during publish."
+            "Enable the OIIO combine job that merges denoised beauty with "
+            "the untouched AOVs (crypto, depth, ...) from the raw render."
         ),
     )
 
-    python_executable: str = SettingsField(
-        "python",
-        title="Python Executable",
+    priority: int = SettingsField(
+        50,
+        title="Deadline Priority",
+        description="Priority of the combine Deadline job.",
+    )
+
+    pool: str = SettingsField(
+        "default",
+        title="Deadline Pool",
+        description="Pool of the combine Deadline job.",
+    )
+
+    group: str = SettingsField(
+        "default",
+        title="Deadline Group",
+        description="Group of the combine Deadline job.",
+    )
+
+    wrapper_script_path: str = SettingsField(
+        "",
+        title="Combine Wrapper Script Path (oiio_combine.py)",
         description=(
-            "Python used on the Deadline worker to run the combine wrapper "
-            "script. Absolute path or a name resolvable on the worker PATH."
+            "Absolute path to oiio_combine.py on a shared filesystem "
+            "accessible from both the submitting machine AND every Deadline "
+            "render node. Supports the {version} token. MUST be configured "
+            "for the OIIO combine step to submit."
         ),
     )
 
     run_when_denoise_disabled: bool = SettingsField(
         False,
-        title="Run OIIO Combine when denoise is disabled",
+        title="Run Combine when denoise is disabled",
         description=(
             "Only applies when denoise did NOT run for an instance. "
-            "When False (default), the OIIO combine job is skipped entirely "
+            "When False (default), the combine job is skipped entirely "
             "and publish pulls from the raw render directory. When True, "
-            "the combine job runs as a pass-through over the raw render "
-            "(useful if downstream tooling needs 'combined/' as a consistent "
-            "publish location). When denoise did run, the combine job "
-            "always runs regardless of this flag."
+            "the combine job runs as a pass-through over the raw render. "
+            "When denoise did run, the combine job always runs."
         ),
     )
 
@@ -273,24 +290,9 @@ class LumaDenoiseSettings(BaseSettingsModel):
         default_factory=lambda: ["*_mse", "mse", "sampleCount"],
         title="Channel Exclude Patterns",
         description=(
-            "fnmatch glob patterns. Any raw-render channel whose name matches "
-            "any pattern is excluded from the combined output. Defaults strip "
-            "denoiser-internal variance/guidance channels that have no "
-            "compositing value."
-        ),
-    )
-
-    beauty_rename_map_denoised: list[ChannelRenamePair] = SettingsField(
-        default_factory=lambda: [
-            ChannelRenamePair(source="Ci.r", target="R"),
-            ChannelRenamePair(source="Ci.g", target="G"),
-            ChannelRenamePair(source="Ci.b", target="B"),
-            ChannelRenamePair(source="a.Z", target="A"),
-        ],
-        title="Beauty Rename Map (denoised)",
-        description=(
-            "Rename applied to the output's primary beauty channels when "
-            "denoise ran (RenderMan Ci/a convention → Nuke R/G/B/A)."
+            "fnmatch glob patterns. Any raw-render channel whose name "
+            "matches any pattern is excluded from the combined output. "
+            "Defaults strip denoiser-internal variance/guidance channels."
         ),
     )
 
@@ -303,8 +305,10 @@ class LumaDenoiseSettings(BaseSettingsModel):
         ],
         title="Beauty Rename Map (raw pass-through)",
         description=(
-            "Rename applied when denoise did not run and OIIO is running "
-            "in pass-through mode. Uses traditional non-denoised AOV naming."
+            "Rename applied when denoise did not run and the combine job "
+            "runs in pass-through mode over the raw render. When denoise "
+            "ran, the rename map comes from the active denoiser backend "
+            "instead (see the Denoising section)."
         ),
     )
 
@@ -322,9 +326,9 @@ class LumaDenoiseSettings(BaseSettingsModel):
         "zips",
         title="Output Compression",
         description=(
-            "Passed to oiiotool as --compression <val>. Empty string disables "
-            "the flag. Common values: 'zips' (fast, default), 'zip' (slower, "
-            "slightly smaller), 'piz' (smaller for natural images, slower)."
+            "Passed to oiiotool as --compression <val>. Empty string "
+            "disables the flag. Common values: 'zips' (fast, default), "
+            "'zip', 'piz'."
         ),
     )
 
@@ -333,43 +337,98 @@ class LumaDenoiseSettings(BaseSettingsModel):
         title="Output Data Type",
         description=(
             "'preserve' keeps oiiotool's default per-channel types (depth "
-            "stays float, beauty stays half — required for Nuke). 'float' "
+            "stays float, beauty stays half - required for Nuke). 'float' "
             "and 'half' force uniform output precision."
         ),
-        enum_resolver=lambda: ["preserve", "float", "half"],
+        enum_resolver=_output_data_type_enum,
     )
 
-    write_combine_manifest: bool = SettingsField(
+    write_manifest: bool = SettingsField(
         True,
         title="Write Combine Manifest",
         description=(
             "When True, the wrapper writes one <name>.combine.json sidecar "
-            "per render sequence (frame token stripped from the sidecar "
-            "name) recording every channel decision. Useful for debugging; "
-            "disable once the pipeline is stable."
+            "per render sequence recording every channel decision. Useful "
+            "for debugging; disable once the pipeline is stable."
         ),
     )
 
-    wrapper_verbose_logging: bool = SettingsField(
+    verbose_logging: bool = SettingsField(
         True,
         title="Verbose Wrapper Logging",
         description=(
-            "Toggles the wrapper script's -v flag. When True, channel lists "
-            "and the full oiiotool command are logged to the Deadline task "
-            "log."
+            "Toggles the wrapper script's -v flag. When True, channel "
+            "lists and the full oiiotool command are logged to the "
+            "Deadline task log."
         ),
     )
 
-    # Output configuration
     output_subdirectory: str = SettingsField(
         "combined",
         title="Output Subdirectory",
-        description="Subdirectory for combined output files",
+        description="Subdirectory for combined output files.",
     )
 
     preserve_intermediates: bool = SettingsField(
         False,
         title="Preserve Intermediates",
-        description="Keep intermediate files after processing",
+        description="Keep intermediate files after processing.",
     )
 
+
+class SharedToolsSettings(BaseSettingsModel):
+    """Tools used by more than one step (denoise extraction AND combine)."""
+
+    python_executable: str = SettingsField(
+        "python",
+        title="Python Executable (Deadline workers)",
+        description=(
+            "Python used on the Deadline workers to run ALL wrapper "
+            "scripts (denoise and combine). Absolute path or a name "
+            "resolvable on the worker PATH."
+        ),
+    )
+
+    oiio_root_path: str = SettingsField(
+        "/opt/oiio",
+        title="OIIO Root Path",
+        description=(
+            "Path to the OpenImageIO installation root on the Deadline "
+            "workers. Used by the combine step and by OIDN channel "
+            "extraction."
+        ),
+    )
+
+    oiio_exe: str = SettingsField(
+        "oiiotool",
+        title="oiiotool Executable Name",
+        description=(
+            "Name of the oiiotool executable in <OIIO root>/bin. Set to "
+            "'oiiotool.exe' for Windows worker pools."
+        ),
+    )
+
+
+class LumaDenoiseSettings(BaseSettingsModel):
+    """Post-render denoise + combine pipeline for Houdini USD renders."""
+
+    denoise: DenoiseSettings = SettingsField(
+        default_factory=DenoiseSettings,
+        title="Denoising",
+        description="The denoise Deadline job (runs after the render job).",
+    )
+
+    combine: CombineSettings = SettingsField(
+        default_factory=CombineSettings,
+        title="OIIO Combine",
+        description=(
+            "The OIIO combine Deadline job (runs after the denoise job; "
+            "merges denoised beauty with untouched AOVs)."
+        ),
+    )
+
+    shared: SharedToolsSettings = SettingsField(
+        default_factory=SharedToolsSettings,
+        title="Shared Tools",
+        description="Worker-side tools used by both steps.",
+    )

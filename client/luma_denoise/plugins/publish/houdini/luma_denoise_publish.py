@@ -45,7 +45,7 @@ class LumaDenoiseUsdRender(
 
         # Get denoise settings from project settings
         project_settings = context.data["project_settings"]
-        denoise_settings = project_settings["luma-denoise"]
+        denoise_settings = project_settings["luma-denoise"].get("denoise", {})
 
         filepath = context.data["currentFile"]
         scenename = os.path.basename(filepath)
@@ -59,15 +59,15 @@ class LumaDenoiseUsdRender(
         job_info.Plugin = "CommandLine"
 
         # Set job priority from settings
-        job_priority = denoise_settings.get("denoise_deadline_priority", 50)
+        job_priority = denoise_settings.get("priority", 50)
         job_info.Priority = job_priority
 
         # Set pool from settings
-        job_pool = denoise_settings.get("denoise_pool", "luma")
+        job_pool = denoise_settings.get("pool", "luma")
         job_info.Pool = job_pool
 
         # Set group from settings
-        job_group = denoise_settings.get("denoise_group", "denoise_group")
+        job_group = denoise_settings.get("group", "denoise_group")
         job_info.Group = job_group
 
         # Set job dependencies if provided (should depend on render job)
@@ -91,12 +91,12 @@ class LumaDenoiseUsdRender(
 
     def get_plugin_info(self, job_type=None):
         instance = self._instance
-        denoise_settings = (
+        addon_settings = (
             instance.context.data["project_settings"]["luma-denoise"])
 
         plugin_info = CommandLinePluginInfo(
-            Executable=self._backend.get_executable(denoise_settings),
-            Arguments=self._backend.get_arguments(instance, denoise_settings),
+            Executable=self._backend.get_executable(addon_settings),
+            Arguments=self._backend.get_arguments(instance, addon_settings),
             SingleFramesOnly=False,
             ShellExecute=False,
             Shell="cmd",
@@ -108,15 +108,15 @@ class LumaDenoiseUsdRender(
         project_settings = instance.context.data["project_settings"]
 
         # Use only luma-denoise settings
-        denoise_settings = project_settings["luma-denoise"]
+        denoise_settings = project_settings["luma-denoise"].get("denoise", {})
 
         # Check if denoising is enabled in settings
-        if not denoise_settings.get("denoise_enabled", False):
+        if not denoise_settings.get("enabled", False):
             self.log.info("Denoising disabled in 'luma-denoise' settings.")
             return False
 
         # Get default enabled state from settings
-        default_enabled = denoise_settings.get("denoise_enabled", True)
+        default_enabled = denoise_settings.get("enabled", True)
 
         # The denoise value is now set by HoudiniSubmitDeadlineUsdRender plugin
         # Skip if already set in instance.data by the deadline submission
@@ -174,10 +174,11 @@ class LumaDenoiseUsdRender(
 
             # Resolve the denoiser backend from settings and validate config.
             project_settings = context.data["project_settings"]
-            denoise_settings = project_settings["luma-denoise"]
-            backend_name = denoise_settings.get("denoiser", "renderman")
+            addon_settings = project_settings["luma-denoise"]
+            backend_name = addon_settings.get(
+                "denoise", {}).get("denoiser", "renderman")
             self._backend = get_denoiser_backend(backend_name)
-            self._backend.validate(instance, denoise_settings)
+            self._backend.validate(instance, addon_settings)
             instance.data["denoise_backend"] = self._backend.name
             self.log.info(f"Using denoiser backend: {self._backend.name}")
 
@@ -187,7 +188,7 @@ class LumaDenoiseUsdRender(
 
             # Backend-specific job environment (license, PATH, etc.).
             for key, value in self._backend.get_environment(
-                    denoise_settings).items():
+                    addon_settings).items():
                 self.job_info.EnvironmentKeyValue[key] = value
 
             # Set up plugin info for denoising
