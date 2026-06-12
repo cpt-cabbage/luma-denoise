@@ -52,3 +52,95 @@ def test_base_resolve_wrapper_path_empty_raises_actionable_error():
     backend.name = "renderman"
     with pytest.raises(RuntimeError, match="wrapper_script_path"):
         backend._resolve_wrapper_path({"renderman": {"wrapper_script_path": ""}})
+
+
+from denoisers.renderman import RendermanDenoiser  # noqa: E402
+
+
+RM_SETTINGS = {
+    "python_executable": "/usr/bin/python3",
+    "renderman": {
+        "rmantree_path": "/opt/pixar/RenderManProServer-26.3",
+        "denoise_exe": "denoise_batch",
+        "pixar_license": "9010@192.168.35.28",
+        "tiled_denoise_threshold": 2048,
+        "wrapper_script_path": "L:/scripts/{version}/renderman_denoise.py",
+    },
+}
+
+
+def _rm_backend(monkeypatch, large_image=False):
+    backend = RendermanDenoiser()
+    monkeypatch.setattr(
+        backend, "detect_large_image", lambda instance, rm_settings: large_image)
+    return backend
+
+
+def test_renderman_name_and_combine_flag():
+    backend = RendermanDenoiser()
+    assert backend.name == "renderman"
+    assert backend.requires_combine is True
+    assert backend.wrapper_filename == "renderman_denoise.py"
+
+
+def test_renderman_arguments_basic(monkeypatch):
+    backend = _rm_backend(monkeypatch)
+    instance = make_instance()
+    args = backend.get_arguments(instance, RM_SETTINGS)
+    assert args.startswith("L:/scripts/")
+    assert "--denoise-exe /opt/pixar/RenderManProServer-26.3/bin/denoise_batch" in args
+    assert "--input /renders/shot/main/shot_main.1001.exr" in args
+    assert "--output-dir /renders/shot/main/denoised" in args
+    assert "--frame-start 1001" in args
+    assert "--frame-end 1100" in args
+    # 100 frames >= 8 -> cross-frame on; not a large image -> no tiles
+    assert "--cross-frame" in args
+    assert "--tiles" not in args
+
+
+def test_renderman_arguments_short_range_no_cross_frame(monkeypatch):
+    backend = _rm_backend(monkeypatch)
+    instance = make_instance(frameStartHandle=1001, frameEndHandle=1004)
+    args = backend.get_arguments(instance, RM_SETTINGS)
+    assert "--cross-frame" not in args
+
+
+def test_renderman_arguments_custom_frames_drive_cross_frame(monkeypatch):
+    backend = _rm_backend(monkeypatch)
+    # Range says 1 frame, custom frames say 10 -> cross-frame on.
+    instance = make_instance(
+        frameStartHandle=1001, frameEndHandle=1001,
+        publish_attributes={"CollectJobInfo": {
+            "use_custom_frames": "custom_only",
+            "frames": "1001-1010",
+        }})
+    args = backend.get_arguments(instance, RM_SETTINGS)
+    assert "--cross-frame" in args
+
+
+def test_renderman_arguments_large_image_enables_tiles(monkeypatch):
+    backend = _rm_backend(monkeypatch, large_image=True)
+    args = backend.get_arguments(make_instance(), RM_SETTINGS)
+    assert "--tiles 2 2" in args
+
+
+def test_renderman_environment():
+    backend = RendermanDenoiser()
+    env = backend.get_environment(RM_SETTINGS)
+    assert env["RMANTREE"] == "/opt/pixar/RenderManProServer-26.3"
+    assert env["PIXAR_LICENSE_FILE"] == "9010@192.168.35.28"
+    assert env["PATH"] == "/opt/pixar/RenderManProServer-26.3/bin"
+
+
+def test_renderman_validate_requires_wrapper_path():
+    backend = RendermanDenoiser()
+    bad = {"renderman": {"wrapper_script_path": ""}}
+    with pytest.raises(RuntimeError, match="renderman.wrapper_script_path"):
+        backend.validate(make_instance(), bad)
+
+
+def test_count_custom_frames():
+    count = RendermanDenoiser._count_custom_frames
+    assert count("1001,1003-1006,1010") == 6
+    assert count("1001") == 1
+    assert count("") == 1
