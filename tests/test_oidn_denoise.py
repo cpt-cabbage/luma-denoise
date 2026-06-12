@@ -22,7 +22,7 @@ CHANNELS = [
 ]
 
 
-def _argv(tmp_path, **overrides):
+def _argv(tmp_path):
     argv = [
         "--oidn-exe", "/opt/oidn/bin/oidnDenoise",
         "--oiiotool", "/opt/oiio/bin/oiiotool",
@@ -92,8 +92,9 @@ def test_build_frame_commands_sequence(tmp_path):
     # oidnDenoise with guides
     assert cmds[3][0] == "/opt/oidn/bin/oidnDenoise"
     assert "--hdr" in cmds[3] and "--alb" in cmds[3] and "--nrm" in cmds[3]
-    # reassembly renames back to the original beauty channel names
+    # reassembly selects 3 channels, then renames back to the original beauty names
     assert cmds[4][0] == "/opt/oiio/bin/oiiotool"
+    assert "R,G,B" in cmds[4]
     assert "--chnames" in cmds[4]
     assert "beauty.r,beauty.g,beauty.b" in cmds[4]
     assert cmds[4][-1] == out_path
@@ -169,3 +170,12 @@ def test_main_missing_guide_channel_fails_loudly(tmp_path, monkeypatch, capsys):
     assert rc == 1
     captured = capsys.readouterr()
     assert "oidn.normal_channel" in captured.err
+
+
+def test_main_inverted_frame_range_fails(tmp_path, capsys):
+    argv = _argv(tmp_path)
+    argv[argv.index("--frame-start") + 1] = "1010"
+    argv[argv.index("--frame-end") + 1] = "1001"
+    rc = oidn_denoise.main(argv)
+    assert rc == 1
+    assert "frame_start" in capsys.readouterr().err

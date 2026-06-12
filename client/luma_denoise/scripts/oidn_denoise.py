@@ -204,7 +204,7 @@ def build_frame_commands(args: argparse.Namespace, in_path: str,
         [args.oidn_exe, "--hdr", t("beauty.exr"),
          "--alb", t("albedo.exr"), "--nrm", t("normal.exr"),
          "-o", t("denoised.exr")],
-        [args.oiiotool, t("denoised.exr"),
+        [args.oiiotool, t("denoised.exr"), "--ch", "R,G,B",
          "--chnames", ",".join(beauty),
          "-o", out_path],
     ]
@@ -292,6 +292,10 @@ def main(argv: Sequence[str] | None = None) -> int:
 
 
 def _run(args: argparse.Namespace) -> int:
+    if args.frame_start > args.frame_end:
+        raise RuntimeError(
+            f"frame_start ({args.frame_start}) > frame_end "
+            f"({args.frame_end}) - nothing to denoise.")
     output_dir = args.output_dir.replace("\\", "/")
     os.makedirs(output_dir, exist_ok=True)
 
