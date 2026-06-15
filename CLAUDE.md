@@ -42,7 +42,7 @@ Single source of truth: `package.py` (`version = "0.0.10"`).
 ### Server Side (`server/`)
 
 - `__init__.py` — `LumaDenoiseAddon(BaseServerAddon)` with `LumaDenoiseSettings` as its settings model. No custom endpoints.
-- `settings.py` — Pydantic settings model with three groups: Denoising (denoiser dropdown + per-backend config incl. beauty rename maps), OIIO Combine (combine job + pass-through rename map), Shared Tools (worker python, OIIO paths).
+- `settings.py` — Pydantic settings model with three groups: Denoising (denoiser dropdown + per-backend config incl. beauty rename maps), OIIO Combine (combine job + pass-through rename map), Shared Tools (worker python, OIIO paths). All tool/wrapper paths are per-platform (windows/linux/darwin) and resolve via each step's Worker Platform dropdown at submission time.
 
 ### Client Side (`client/luma_denoise/`)
 
