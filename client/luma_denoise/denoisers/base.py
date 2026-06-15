@@ -22,6 +22,17 @@ def quote(value: str) -> str:
     return value
 
 
+def resolve_platform_value(value, worker_platform: str) -> str:
+    """Resolve a multiplatform settings value for a worker platform.
+
+    Accepts the {windows, linux, darwin} dict shape (AYON multiplatform
+    path); plain strings pass through so pre-0.4.0 values keep working.
+    """
+    if isinstance(value, dict):
+        return value.get(worker_platform, "") or ""
+    return value or ""
+
+
 class DenoiserBackend:
     """Base class for denoiser backends.
 
@@ -36,14 +47,20 @@ class DenoiserBackend:
     #: Whether the OIIO combine job is required after this denoiser.
     requires_combine = True
 
+    def _worker_platform(self, settings: dict) -> str:
+        denoise_settings = settings.get("denoise", {}) or {}
+        return denoise_settings.get("worker_platform", "linux")
+
     def get_executable(self, settings: dict) -> str:
         """Executable for the Deadline job — the worker Python.
 
         Both current backends run Python wrapper scripts, so this is the
         same ``shared.python_executable`` setting the combine wrapper uses.
         """
-        return (settings.get("shared", {}) or {}).get(
-            "python_executable", "python")
+        shared = settings.get("shared", {}) or {}
+        return resolve_platform_value(
+            shared.get("python_executable", "python"),
+            self._worker_platform(settings)) or "python"
 
     def get_arguments(self, instance, settings: dict) -> str:
         """Full Arguments string for the Deadline CommandLine plugin."""
@@ -64,16 +81,18 @@ class DenoiserBackend:
         return denoise_settings.get(self.name, {}) or {}
 
     def _resolve_wrapper_path(self, settings: dict) -> str:
-        template = self._backend_settings(settings).get("wrapper_script_path", "")
+        platform_key = self._worker_platform(settings)
+        template = resolve_platform_value(
+            self._backend_settings(settings).get("wrapper_script_path", ""),
+            platform_key)
         if not template:
             raise RuntimeError(
-                f"luma-denoise: 'denoise.{self.name}.wrapper_script_path' is not "
-                f"configured. Set it in the luma-denoise project settings to "
-                f"the absolute path of {self.wrapper_filename or 'the wrapper script'} "
+                f"luma-denoise: 'denoise.{self.name}.wrapper_script_path' "
+                f"has no value for worker platform '{platform_key}'. "
+                f"Set it in the luma-denoise project settings to the "
+                f"absolute path of {self.wrapper_filename or 'the wrapper script'} "
                 "on a shared filesystem accessible from all render nodes. "
-                "Use the {version} token for per-version paths, e.g. "
-                "'L:/tools/.../luma_denoise_scripts/{version}/"
-                f"{self.wrapper_filename}'."
+                "Use the {version} token for per-version paths."
             )
         return template.replace("{version}", ADDON_VERSION)
 

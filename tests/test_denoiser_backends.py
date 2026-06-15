@@ -31,17 +31,25 @@ def test_quote_adds_quotes_only_when_needed():
     assert base.quote('"/already quoted/p.py"') == '"/already quoted/p.py"'
 
 
-def test_base_get_executable_uses_python_executable_setting():
+def test_base_get_executable_resolves_worker_platform():
     backend = base.DenoiserBackend()
-    assert backend.get_executable({"shared": {"python_executable": "/py/bin/python3"}}) == "/py/bin/python3"
+    settings = {
+        "denoise": {"worker_platform": "windows"},
+        "shared": {"python_executable": {
+            "windows": "py.exe", "linux": "/usr/bin/python3", "darwin": ""}},
+    }
+    assert backend.get_executable(settings) == "py.exe"
+    settings["denoise"]["worker_platform"] = "linux"
+    assert backend.get_executable(settings) == "/usr/bin/python3"
     assert backend.get_executable({}) == "python"
 
 
 def test_base_resolve_wrapper_path_substitutes_version():
     backend = base.DenoiserBackend()
     backend.name = "renderman"
-    settings = {"denoise": {"renderman": {
-        "wrapper_script_path": "L:/scripts/{version}/renderman_denoise.py"}}}
+    settings = {"denoise": {"worker_platform": "linux", "renderman": {
+        "wrapper_script_path": {"linux": "L:/scripts/{version}/renderman_denoise.py",
+                                "windows": "", "darwin": ""}}}}
     resolved = backend._resolve_wrapper_path(settings)
     assert "{version}" not in resolved
     assert resolved.endswith("/renderman_denoise.py")
@@ -51,23 +59,36 @@ def test_base_resolve_wrapper_path_empty_raises_actionable_error():
     backend = base.DenoiserBackend()
     backend.name = "renderman"
     with pytest.raises(RuntimeError, match="denoise.renderman.wrapper_script_path"):
-        backend._resolve_wrapper_path({"denoise": {"renderman": {"wrapper_script_path": ""}}})
+        backend._resolve_wrapper_path({"denoise": {"worker_platform": "linux", "renderman": {"wrapper_script_path": {"linux": "", "windows": "", "darwin": ""}}}})
+
+
+def test_resolve_platform_value_dict_and_passthrough():
+    assert base.resolve_platform_value(
+        {"windows": "a.exe", "linux": "a", "darwin": ""}, "windows") == "a.exe"
+    assert base.resolve_platform_value(
+        {"windows": "a.exe", "linux": "a", "darwin": ""}, "darwin") == ""
+    assert base.resolve_platform_value("plain", "linux") == "plain"
+    assert base.resolve_platform_value(None, "linux") == ""
 
 
 from denoisers.renderman import RendermanDenoiser  # noqa: E402
 
 
 RM_SETTINGS = {
-    "shared": {"python_executable": "/usr/bin/python3",
-               "oiio_root_path": "/opt/oiio", "oiio_exe": "oiiotool"},
+    "shared": {
+        "python_executable": {"windows": "python.exe", "linux": "/usr/bin/python3", "darwin": "python3"},
+        "oiio_root_path": {"windows": "C:/oiio", "linux": "/opt/oiio", "darwin": ""},
+        "oiio_exe": {"windows": "oiiotool.exe", "linux": "oiiotool", "darwin": "oiiotool"},
+    },
     "denoise": {
         "denoiser": "renderman",
+        "worker_platform": "linux",
         "renderman": {
-            "rmantree_path": "/opt/pixar/RenderManProServer-26.3",
-            "denoise_exe": "denoise_batch",
+            "rmantree_path": {"windows": "C:/Pixar/RMP", "linux": "/opt/pixar/RenderManProServer-26.3", "darwin": ""},
+            "denoise_exe": {"windows": "denoise_batch.exe", "linux": "denoise_batch", "darwin": "denoise_batch"},
             "pixar_license": "9010@192.168.35.28",
             "tiled_denoise_threshold": 2048,
-            "wrapper_script_path": "L:/scripts/{version}/renderman_denoise.py",
+            "wrapper_script_path": {"windows": "W:/scripts/{version}/renderman_denoise.py", "linux": "L:/scripts/{version}/renderman_denoise.py", "darwin": ""},
             "beauty_rename_map": [
                 {"source": "Ci.r", "target": "R"},
                 {"source": "a.Z", "target": "A"},
@@ -149,6 +170,24 @@ def test_renderman_validate_requires_wrapper_path():
         backend.validate(make_instance(), bad)
 
 
+def test_renderman_arguments_windows_worker_platform(monkeypatch):
+    import copy
+    backend = _rm_backend(monkeypatch)
+    settings = copy.deepcopy(RM_SETTINGS)
+    settings["denoise"]["worker_platform"] = "windows"
+    args = backend.get_arguments(make_instance(), settings)
+    assert "--denoise-exe C:/Pixar/RMP/bin/denoise_batch.exe" in args
+    assert args.startswith("W:/scripts/")
+
+
+def test_wrapper_path_missing_for_platform_names_platform():
+    backend = RendermanDenoiser()
+    settings = {"denoise": {"worker_platform": "darwin", "renderman": {
+        "wrapper_script_path": {"windows": "w", "linux": "l", "darwin": ""}}}}
+    with pytest.raises(RuntimeError, match="darwin"):
+        backend.validate(make_instance(), settings)
+
+
 def test_count_custom_frames():
     count = RendermanDenoiser._count_custom_frames
     assert count("1001,1003-1006,1010") == 6
@@ -160,14 +199,18 @@ from denoisers.oidn import OidnDenoiser  # noqa: E402
 
 
 OIDN_SETTINGS = {
-    "shared": {"python_executable": "/usr/bin/python3",
-               "oiio_root_path": "/opt/oiio", "oiio_exe": "oiiotool"},
+    "shared": {
+        "python_executable": {"windows": "python.exe", "linux": "/usr/bin/python3", "darwin": "python3"},
+        "oiio_root_path": {"windows": "C:/oiio", "linux": "/opt/oiio", "darwin": ""},
+        "oiio_exe": {"windows": "oiiotool.exe", "linux": "oiiotool", "darwin": "oiiotool"},
+    },
     "denoise": {
         "denoiser": "oidn",
+        "worker_platform": "linux",
         "oidn": {
-            "oidn_root_path": "/opt/oidn",
-            "denoise_exe": "oidnDenoise",
-            "wrapper_script_path": "L:/scripts/{version}/oidn_denoise.py",
+            "oidn_root_path": {"linux": "/opt/oidn", "windows": "", "darwin": ""},
+            "denoise_exe": {"windows": "oidnDenoise.exe", "linux": "oidnDenoise", "darwin": "oidnDenoise"},
+            "wrapper_script_path": {"linux": "L:/scripts/{version}/oidn_denoise.py", "windows": "", "darwin": ""},
             "beauty_channel": "beauty",
             "albedo_channel": "albedo",
             "normal_channel": "N",
