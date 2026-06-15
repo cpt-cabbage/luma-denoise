@@ -6,7 +6,7 @@ import pyblish.api
 
 from ayon_core.pipeline import AYONPyblishPluginMixin
 from ayon_deadline import abstract_submit_deadline
-from luma_denoise.denoisers.base import resolve_platform_value
+from luma_denoise.denoisers.base import DenoiserBackend
 
 try:
     from luma_denoise.version import __version__ as _ADDON_VERSION
@@ -140,21 +140,19 @@ class ExtractOiioCombine(
         combine_settings = oiio_settings.get("combine", {}) or {}
         shared_settings = oiio_settings.get("shared", {}) or {}
 
-        worker_platform = combine_settings.get("worker_platform", "windows")
+        oiio_root_value = shared_settings.get("oiio_root_path", "")
+        oiio_exe_name = shared_settings.get("oiio_exe", "oiiotool") or "oiiotool"
+        python_exe = shared_settings.get("python_executable", "python") or "python"
 
-        oiio_root = resolve_platform_value(
-            shared_settings.get("oiio_root_path", ""), worker_platform
-        ) or (
-            r"L:\tools\_studio_tools\AYON\AYON-1.3.3-windows"
-            r"\addons_resources\ayon_third_party\oiio_windows_83e412e9"
-        )
-        oiiotool_path = os.path.join(
-            oiio_root,
-            "bin",
-            resolve_platform_value(
-                shared_settings.get("oiio_exe", ""), worker_platform
-            ) or "oiiotool",
-        ).replace("\\", "/")
+        wrapper_template = combine_settings.get("wrapper_script_path", "")
+        if not wrapper_template:
+            raise RuntimeError(
+                "luma-denoise: 'combine.wrapper_script_path' is not set. "
+                "Point it at oiio_combine.py on the shared library (Deadline "
+                "Path Mapping translates it per worker). Use the {version} "
+                "token for per-version paths."
+            )
+        wrapper_path = wrapper_template.replace("{version}", _ADDON_VERSION)
 
         first_file = files[0]
         dirname = os.path.dirname(first_file).replace("\\", "/")
@@ -188,26 +186,6 @@ class ExtractOiioCombine(
 
         os.makedirs(os.path.dirname(output_path), exist_ok=True)
 
-        python_exe = resolve_platform_value(
-            shared_settings.get("python_executable", ""), worker_platform
-        ) or "python"
-
-        wrapper_template = resolve_platform_value(
-            combine_settings.get("wrapper_script_path", ""), worker_platform
-        )
-        if not wrapper_template:
-            _err_platform = worker_platform
-            raise RuntimeError(
-                "luma-denoise: 'combine.wrapper_script_path' is not configured "
-                "for worker platform '" + _err_platform + "'. "
-                "Set it in the luma-denoise project settings to the absolute "
-                "path of oiio_combine.py on a shared filesystem accessible "
-                "from all render nodes. Use the {version} token for "
-                "per-version paths, e.g. "
-                "'L:/tools/.../luma_denoise_scripts/{version}/oiio_combine.py'."
-            )
-        wrapper_path = wrapper_template.replace("{version}", _ADDON_VERSION)
-
         default_excludes = list(DEFAULT_EXCLUDE_PATTERNS)
         user_excludes = list(combine_settings.get(
             "channel_exclude_patterns", default_excludes))
@@ -234,7 +212,8 @@ class ExtractOiioCombine(
         parts.extend(["--denoised", self._quote(denoised_path)])
         parts.extend(["--raw", self._quote(renders_path)])
         parts.extend(["--output", self._quote(output_path)])
-        parts.extend(["--oiiotool", self._quote(oiiotool_path)])
+        parts.extend(DenoiserBackend.platform_triplet_args("oiio-root", oiio_root_value))
+        parts.extend(["--oiio-exe-name", self._quote(oiio_exe_name)])
         for pat in all_excludes:
             parts.extend(["--exclude", self._quote(pat)])
         parts.extend(["--num-default-excludes", str(num_defaults)])
