@@ -6,6 +6,7 @@ import pyblish.api
 
 from ayon_core.pipeline import AYONPyblishPluginMixin
 from ayon_deadline import abstract_submit_deadline
+from luma_denoise.denoisers.base import resolve_platform_value
 
 try:
     from luma_denoise.version import __version__ as _ADDON_VERSION
@@ -139,13 +140,20 @@ class ExtractOiioCombine(
         combine_settings = oiio_settings.get("combine", {}) or {}
         shared_settings = oiio_settings.get("shared", {}) or {}
 
-        oiio_root = shared_settings.get(
-            "oiio_root_path",
+        worker_platform = combine_settings.get("worker_platform", "windows")
+
+        oiio_root = resolve_platform_value(
+            shared_settings.get("oiio_root_path", ""), worker_platform
+        ) or (
             r"L:\tools\_studio_tools\AYON\AYON-1.3.3-windows"
-            r"\addons_resources\ayon_third_party\oiio_windows_83e412e9",
+            r"\addons_resources\ayon_third_party\oiio_windows_83e412e9"
         )
         oiiotool_path = os.path.join(
-            oiio_root, "bin", shared_settings.get("oiio_exe", "oiiotool")
+            oiio_root,
+            "bin",
+            resolve_platform_value(
+                shared_settings.get("oiio_exe", ""), worker_platform
+            ) or "oiiotool",
         ).replace("\\", "/")
 
         first_file = files[0]
@@ -180,12 +188,18 @@ class ExtractOiioCombine(
 
         os.makedirs(os.path.dirname(output_path), exist_ok=True)
 
-        python_exe = shared_settings.get("python_executable", "python")
+        python_exe = resolve_platform_value(
+            shared_settings.get("python_executable", ""), worker_platform
+        ) or "python"
 
-        wrapper_template = combine_settings.get("wrapper_script_path", "")
+        wrapper_template = resolve_platform_value(
+            combine_settings.get("wrapper_script_path", ""), worker_platform
+        )
         if not wrapper_template:
+            _err_platform = worker_platform
             raise RuntimeError(
-                "luma-denoise: 'combine.wrapper_script_path' is not configured. "
+                "luma-denoise: 'combine.wrapper_script_path' is not configured "
+                "for worker platform '" + _err_platform + "'. "
                 "Set it in the luma-denoise project settings to the absolute "
                 "path of oiio_combine.py on a shared filesystem accessible "
                 "from all render nodes. Use the {version} token for "
