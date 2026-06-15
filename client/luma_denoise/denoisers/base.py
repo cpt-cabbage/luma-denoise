@@ -47,20 +47,15 @@ class DenoiserBackend:
     #: Whether the OIIO combine job is required after this denoiser.
     requires_combine = True
 
-    def _worker_platform(self, settings: dict) -> str:
-        denoise_settings = settings.get("denoise", {}) or {}
-        return denoise_settings.get("worker_platform", "linux")
-
     def get_executable(self, settings: dict) -> str:
         """Executable for the Deadline job — the worker Python.
 
         Both current backends run Python wrapper scripts, so this is the
         same ``shared.python_executable`` setting the combine wrapper uses.
+        Single value — Deadline Path Mapping translates it per worker OS.
         """
         shared = settings.get("shared", {}) or {}
-        return resolve_platform_value(
-            shared.get("python_executable", "python"),
-            self._worker_platform(settings)) or "python"
+        return shared.get("python_executable", "python") or "python"
 
     def get_arguments(self, instance, settings: dict) -> str:
         """Full Arguments string for the Deadline CommandLine plugin."""
@@ -81,20 +76,34 @@ class DenoiserBackend:
         return denoise_settings.get(self.name, {}) or {}
 
     def _resolve_wrapper_path(self, settings: dict) -> str:
-        platform_key = self._worker_platform(settings)
-        template = resolve_platform_value(
-            self._backend_settings(settings).get("wrapper_script_path", ""),
-            platform_key)
+        template = self._backend_settings(settings).get("wrapper_script_path", "")
         if not template:
             raise RuntimeError(
-                f"luma-denoise: 'denoise.{self.name}.wrapper_script_path' "
-                f"has no value for worker platform '{platform_key}'. "
-                f"Set it in the luma-denoise project settings to the "
-                f"absolute path of {self.wrapper_filename or 'the wrapper script'} "
-                "on a shared filesystem accessible from all render nodes. "
+                f"luma-denoise: 'denoise.{self.name}.wrapper_script_path' is "
+                "not set. Point it at "
+                f"{self.wrapper_filename or 'the wrapper script'} on the shared "
+                "library (Deadline Path Mapping translates it per worker). "
                 "Use the {version} token for per-version paths."
             )
         return template.replace("{version}", ADDON_VERSION)
+
+    @staticmethod
+    def platform_triplet_args(prefix: str, value) -> list:
+        """Emit ['--<prefix>-windows', w, '--<prefix>-linux', l,
+        '--<prefix>-darwin', d] from a {windows,linux,darwin} dict (or a
+        plain string applied to all three). Empty values are emitted as a
+        literal '""' token so they survive command-line splitting."""
+        if isinstance(value, dict):
+            vals = {p: (value.get(p, "") or "") for p in
+                    ("windows", "linux", "darwin")}
+        else:
+            v = value or ""
+            vals = {"windows": v, "linux": v, "darwin": v}
+        out = []
+        for p in ("windows", "linux", "darwin"):
+            v = vals[p]
+            out.extend([f"--{prefix}-{p}", quote(v) if v else '""'])
+        return out
 
     def rename_pair_args(self, settings: dict) -> list:
         """Backend's beauty_rename_map as ['--rename', 'SRC=DST', ...].

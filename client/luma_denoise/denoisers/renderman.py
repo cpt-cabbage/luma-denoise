@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import os
 
-from .base import ADDON_VERSION, DenoiserBackend, quote, resolve_platform_value
+from .base import ADDON_VERSION, DenoiserBackend, quote
 
 
 class RendermanDenoiser(DenoiserBackend):
@@ -23,25 +23,23 @@ class RendermanDenoiser(DenoiserBackend):
         frame_start = int(instance.data.get("frameStartHandle", 1))
         frame_end = int(instance.data.get("frameEndHandle", 1))
 
-        platform_key = self._worker_platform(settings)
-        rman_root = resolve_platform_value(
-            rm_settings.get("rmantree_path", ""), platform_key
-        ) or "/opt/pixar/RenderManProServer-26.3"
-        exe_name = resolve_platform_value(
-            rm_settings.get("denoise_exe", ""), platform_key) or "denoise_batch"
-        denoise_exe = f"{rman_root}/bin/{exe_name}"
-
+        exe_name = rm_settings.get("denoise_exe", "denoise_batch") or "denoise_batch"
+        pixar_license = rm_settings.get("pixar_license", "")
         wrapper_path = self._resolve_wrapper_path(settings)
 
-        parts = [
-            quote(wrapper_path),
-            "--denoise-exe", quote(denoise_exe),
+        parts = [quote(wrapper_path)]
+        parts.extend(self.platform_triplet_args(
+            "rmantree", rm_settings.get("rmantree_path", "")))
+        parts.extend(["--denoise-exe-name", quote(exe_name)])
+        if pixar_license:
+            parts.extend(["--pixar-license", quote(pixar_license)])
+        parts.extend([
             "--input", quote(f"{dirname}/{basename}"),
             "--output-dir", quote(f"{dirname}/denoised"),
             "--frame-start", str(frame_start),
             "--frame-end", str(frame_end),
             "--addon-version", ADDON_VERSION,
-        ]
+        ])
         if self._frame_count(instance) >= 8:
             parts.append("--cross-frame")
         if self.detect_large_image(instance, rm_settings):
@@ -51,18 +49,7 @@ class RendermanDenoiser(DenoiserBackend):
         return " ".join(parts)
 
     def get_environment(self, settings: dict) -> dict:
-        rm_settings = self._backend_settings(settings)
-        platform_key = self._worker_platform(settings)
-        env = {}
-        rman_root = resolve_platform_value(
-            rm_settings.get("rmantree_path", ""), platform_key)
-        if rman_root:
-            env["RMANTREE"] = rman_root
-            env["PATH"] = f"{rman_root}/bin"
-        license_server = rm_settings.get("pixar_license", "")
-        if license_server:
-            env["PIXAR_LICENSE_FILE"] = license_server
-        return env
+        return {}
 
     def validate(self, instance, settings: dict) -> None:
         # Raises with an actionable message when unset.
