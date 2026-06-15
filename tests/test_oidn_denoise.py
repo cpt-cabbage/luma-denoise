@@ -197,3 +197,36 @@ def test_main_malformed_rename_fails_before_work(tmp_path, monkeypatch, capsys):
     assert rc == 1
     assert calls == []
     assert "rename" in capsys.readouterr().err
+
+
+def test_resolve_tools_prefers_roots(monkeypatch):
+    monkeypatch.setattr(oidn_denoise, "current_platform", lambda: "windows")
+    # Build argv WITHOUT legacy --oidn-exe / --oiiotool flags
+    argv = [
+        "--oidn-root-windows", "C:/oidn",
+        "--oiio-root-windows", "C:/oiio",
+        "--input", "/r/shot.1001.exr",
+        "--output-dir", "/r/denoised",
+        "--frame-start", "1001",
+        "--frame-end", "1001",
+    ]
+    args = oidn_denoise.parse_args(argv)
+    oidn_exe, oiiotool, oidn_root = oidn_denoise.resolve_tools(args)
+    assert oidn_exe == "C:/oidn/bin/oidnDenoise.exe"
+    assert oiiotool == "C:/oiio/bin/oiiotool.exe"
+    assert oidn_root == "C:/oidn"
+
+
+def test_resolve_tools_missing_oidn_root_raises(monkeypatch):
+    monkeypatch.setattr(oidn_denoise, "current_platform", lambda: "darwin")
+    # Only oiio root set, no oidn root, no legacy --oidn-exe
+    argv = [
+        "--oiio-root-darwin", "/opt/oiio",
+        "--input", "/r/shot.1001.exr",
+        "--output-dir", "/r/denoised",
+        "--frame-start", "1001",
+        "--frame-end", "1001",
+    ]
+    args = oidn_denoise.parse_args(argv)
+    with pytest.raises(RuntimeError, match="OIDN root"):
+        oidn_denoise.resolve_tools(args)
