@@ -63,12 +63,12 @@ def test_resolve_platform_value_dict_and_passthrough():
     assert base.resolve_platform_value(None, "linux") == ""
 
 
-def test_platform_triplet_args_from_dict():
+def test_platform_triplet_args_from_dict_omits_empty():
     out = base.DenoiserBackend.platform_triplet_args(
         "rmantree", {"windows": "C:/RMP", "linux": "/opt/rmp", "darwin": ""})
+    # Empty darwin value is omitted entirely (no empty token emitted).
     assert out == ["--rmantree-windows", "C:/RMP",
-                   "--rmantree-linux", "/opt/rmp",
-                   "--rmantree-darwin", '""']
+                   "--rmantree-linux", "/opt/rmp"]
 
 
 def test_platform_triplet_args_from_plain_string():

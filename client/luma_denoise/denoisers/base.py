@@ -89,10 +89,12 @@ class DenoiserBackend:
 
     @staticmethod
     def platform_triplet_args(prefix: str, value) -> list:
-        """Emit ['--<prefix>-windows', w, '--<prefix>-linux', l,
-        '--<prefix>-darwin', d] from a {windows,linux,darwin} dict (or a
-        plain string applied to all three). Empty values are emitted as a
-        literal '""' token so they survive command-line splitting."""
+        """Emit ['--<prefix>-<plat>', v, ...] for each NON-EMPTY per-OS value
+        from a {windows,linux,darwin} dict (or a plain string applied to all
+        three). Empty values are OMITTED entirely — the wrapper's argparse
+        defaults them to "" — which avoids emitting empty command-line tokens
+        (a literal '""' could be read back as a truthy 2-char string and
+        mask a 'no root for this platform' error)."""
         if isinstance(value, dict):
             vals = {p: (value.get(p, "") or "") for p in
                     ("windows", "linux", "darwin")}
@@ -102,7 +104,8 @@ class DenoiserBackend:
         out = []
         for p in ("windows", "linux", "darwin"):
             v = vals[p]
-            out.extend([f"--{prefix}-{p}", quote(v) if v else '""'])
+            if v:
+                out.extend([f"--{prefix}-{p}", quote(v)])
         return out
 
     def rename_pair_args(self, settings: dict) -> list:
