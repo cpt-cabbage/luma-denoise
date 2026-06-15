@@ -53,19 +53,46 @@ def _output_data_type_enum():
     return ["preserve", "float", "half"]
 
 
+def _platform_enum():
+    return [
+        {"value": "windows", "label": "Windows"},
+        {"value": "linux", "label": "Linux"},
+        {"value": "darwin", "label": "macOS"},
+    ]
+
+
+class MultiplatformPathModel(BaseSettingsModel):
+    """One value per worker platform."""
+    _layout = "expanded"
+    windows: str = SettingsField("", title="Windows")
+    linux: str = SettingsField("", title="Linux")
+    darwin: str = SettingsField("", title="macOS")
+
+
 class RendermanDenoiserSettings(BaseSettingsModel):
     """Pixar RenderMan denoise_batch backend."""
 
-    rmantree_path: str = SettingsField(
-        "/opt/pixar/RenderManProServer-26.3",
+    rmantree_path: MultiplatformPathModel = SettingsField(
+        default_factory=lambda: MultiplatformPathModel(
+            windows="C:/Program Files/Pixar/RenderManProServer-26.3",
+            linux="/opt/pixar/RenderManProServer-26.3",
+            darwin="/Applications/Pixar/RenderManProServer-26.3",
+        ),
         title="RenderMan Root Path",
-        description="Path to RMANTREE on the Deadline workers.",
+        description="Path to RMANTREE, per worker platform.",
     )
 
-    denoise_exe: str = SettingsField(
-        "denoise_batch",
+    denoise_exe: MultiplatformPathModel = SettingsField(
+        default_factory=lambda: MultiplatformPathModel(
+            windows="denoise_batch.exe",
+            linux="denoise_batch",
+            darwin="denoise_batch",
+        ),
         title="Denoiser Executable Name",
-        description="Name of the RenderMan denoiser executable in <RMANTREE>/bin.",
+        description=(
+            "Name of the RenderMan denoiser executable in <RMANTREE>/bin, "
+            "per worker platform."
+        ),
     )
 
     pixar_license: str = SettingsField(
@@ -84,15 +111,15 @@ class RendermanDenoiserSettings(BaseSettingsModel):
         ),
     )
 
-    wrapper_script_path: str = SettingsField(
-        "",
+    wrapper_script_path: MultiplatformPathModel = SettingsField(
+        default_factory=MultiplatformPathModel,
         title="RenderMan Wrapper Script Path (renderman_denoise.py)",
         description=(
             "Absolute path to renderman_denoise.py on a shared filesystem "
-            "accessible from every Deadline render node. Supports the "
-            "{version} token - substituted at submission time with the "
-            "luma-denoise addon version. MUST be configured for the "
-            "RenderMan denoise step to submit."
+            "accessible from every Deadline render node, per worker "
+            "platform. Supports the {version} token - substituted at "
+            "submission time with the luma-denoise addon version. MUST be "
+            "configured for the RenderMan denoise step to submit."
         ),
     )
 
@@ -116,26 +143,36 @@ class RendermanDenoiserSettings(BaseSettingsModel):
 class OidnDenoiserSettings(BaseSettingsModel):
     """Intel Open Image Denoise backend."""
 
-    oidn_root_path: str = SettingsField(
-        "/opt/oidn",
+    oidn_root_path: MultiplatformPathModel = SettingsField(
+        default_factory=lambda: MultiplatformPathModel(linux="/opt/oidn"),
         title="OIDN Root Path",
-        description="Path to the OIDN install root on the Deadline workers.",
+        description=(
+            "Path to the OIDN install root on the Deadline workers, per "
+            "worker platform."
+        ),
     )
 
-    denoise_exe: str = SettingsField(
-        "oidnDenoise",
+    denoise_exe: MultiplatformPathModel = SettingsField(
+        default_factory=lambda: MultiplatformPathModel(
+            windows="oidnDenoise.exe",
+            linux="oidnDenoise",
+            darwin="oidnDenoise",
+        ),
         title="Denoiser Executable Name",
-        description="Name of the OIDN executable in <root>/bin.",
+        description=(
+            "Name of the OIDN executable in <root>/bin, per worker "
+            "platform."
+        ),
     )
 
-    wrapper_script_path: str = SettingsField(
-        "",
+    wrapper_script_path: MultiplatformPathModel = SettingsField(
+        default_factory=MultiplatformPathModel,
         title="OIDN Wrapper Script Path (oidn_denoise.py)",
         description=(
             "Absolute path to oidn_denoise.py on a shared filesystem "
-            "accessible from every Deadline render node. Supports the "
-            "{version} token. MUST be configured for the OIDN denoise "
-            "step to submit."
+            "accessible from every Deadline render node, per worker "
+            "platform. Supports the {version} token. MUST be configured "
+            "for the OIDN denoise step to submit."
         ),
     )
 
@@ -220,6 +257,17 @@ class DenoiseSettings(BaseSettingsModel):
         description="Group of the denoise Deadline job.",
     )
 
+    worker_platform: str = SettingsField(
+        "linux",
+        title="Worker Platform",
+        description=(
+            "Platform of the Deadline workers that run the denoise job. "
+            "All denoise paths below resolve for this platform at "
+            "submission time."
+        ),
+        enum_resolver=_platform_enum,
+    )
+
     renderman: RendermanDenoiserSettings = SettingsField(
         default_factory=RendermanDenoiserSettings,
         title="RenderMan Backend",
@@ -263,14 +311,25 @@ class CombineSettings(BaseSettingsModel):
         description="Group of the combine Deadline job.",
     )
 
-    wrapper_script_path: str = SettingsField(
-        "",
+    worker_platform: str = SettingsField(
+        "windows",
+        title="Worker Platform",
+        description=(
+            "Platform of the Deadline workers that run the combine job. "
+            "All combine paths below resolve for this platform at "
+            "submission time."
+        ),
+        enum_resolver=_platform_enum,
+    )
+
+    wrapper_script_path: MultiplatformPathModel = SettingsField(
+        default_factory=MultiplatformPathModel,
         title="Combine Wrapper Script Path (oiio_combine.py)",
         description=(
             "Absolute path to oiio_combine.py on a shared filesystem "
             "accessible from both the submitting machine AND every Deadline "
-            "render node. Supports the {version} token. MUST be configured "
-            "for the OIIO combine step to submit."
+            "render node, per worker platform. Supports the {version} "
+            "token. MUST be configured for the OIIO combine step to submit."
         ),
     )
 
@@ -379,32 +438,40 @@ class CombineSettings(BaseSettingsModel):
 class SharedToolsSettings(BaseSettingsModel):
     """Tools used by more than one step (denoise extraction AND combine)."""
 
-    python_executable: str = SettingsField(
-        "python",
+    python_executable: MultiplatformPathModel = SettingsField(
+        default_factory=lambda: MultiplatformPathModel(
+            windows="python",
+            linux="python",
+            darwin="python",
+        ),
         title="Python Executable (Deadline workers)",
         description=(
             "Python used on the Deadline workers to run ALL wrapper "
-            "scripts (denoise and combine). Absolute path or a name "
-            "resolvable on the worker PATH."
+            "scripts (denoise and combine), per worker platform. Absolute "
+            "path or a name resolvable on the worker PATH."
         ),
     )
 
-    oiio_root_path: str = SettingsField(
-        "/opt/oiio",
+    oiio_root_path: MultiplatformPathModel = SettingsField(
+        default_factory=lambda: MultiplatformPathModel(linux="/opt/oiio"),
         title="OIIO Root Path",
         description=(
             "Path to the OpenImageIO installation root on the Deadline "
-            "workers. Used by the combine step and by OIDN channel "
-            "extraction."
+            "workers, per worker platform. Used by the combine step and "
+            "by OIDN channel extraction."
         ),
     )
 
-    oiio_exe: str = SettingsField(
-        "oiiotool",
+    oiio_exe: MultiplatformPathModel = SettingsField(
+        default_factory=lambda: MultiplatformPathModel(
+            windows="oiiotool.exe",
+            linux="oiiotool",
+            darwin="oiiotool",
+        ),
         title="oiiotool Executable Name",
         description=(
-            "Name of the oiiotool executable in <OIIO root>/bin. Set to "
-            "'oiiotool.exe' for Windows worker pools."
+            "Name of the oiiotool executable in <OIIO root>/bin, per "
+            "worker platform."
         ),
     )
 
