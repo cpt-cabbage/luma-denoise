@@ -1,4 +1,4 @@
-"""renderman_denoise.py - Deadline-worker wrapper for Pixar denoise_batch.
+﻿"""renderman_denoise.py - Deadline-worker wrapper for Pixar denoise_batch.
 
 Runs once per sequence on a Deadline worker (the denoise job has Frames=1;
 denoise_batch processes the whole frame range in one invocation). Invokes
@@ -12,9 +12,17 @@ Standalone by design: deploy this single file to a shared filesystem (the
 
 Usage:
     python renderman_denoise.py
-        --denoise-exe <path> --input <first-frame.exr> --output-dir <dir>
+        --rmantree-linux /opt/pixar/RenderManProServer-26.3
+        --rmantree-windows C:/Pixar/RenderManProServer-26.3
+        --rmantree-darwin ""
+        --denoise-exe-name denoise_batch
+        [--pixar-license 9010@licserver]
+        --input <first-frame.exr> --output-dir <dir>
         --frame-start N --frame-end N
         [--cross-frame] [--tiles X Y] [--addon-version V] [--verbose]
+
+    Legacy (single-worker path, kept for backwards compat):
+        --denoise-exe <path> --input <first-frame.exr> ...
 """
 
 from __future__ import annotations
@@ -22,6 +30,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import platform as _platform_mod
 import re
 import subprocess
 import sys
@@ -30,6 +39,10 @@ from typing import Sequence
 
 _FRAME_RE = re.compile(r"\.(\d{3,})(?=\.[A-Za-z0-9]+$)")
 
+# Cache the platform string at import time so current_platform() never
+# calls subprocess internally (platform.system() on Windows uses 'ver').
+_SYSTEM = _platform_mod.system()
+
 # denoise_batch always emits RenderMan's Ci/a channel convention; the map
 # tells the combine step how to rename them for compositing (Nuke R/G/B/A).
 # 'a.Z' is appended from the raw render by the combine step, not present in
@@ -37,11 +50,38 @@ _FRAME_RE = re.compile(r"\.(\d{3,})(?=\.[A-Za-z0-9]+$)")
 RENDERMAN_BEAUTY_MAP = {"Ci.r": "R", "Ci.g": "G", "Ci.b": "B", "a.Z": "A"}
 
 
+def current_platform() -> str:
+    """Return the current platform as 'windows', 'linux', or 'darwin'."""
+    return {"Windows": "windows", "Linux": "linux",
+            "Darwin": "darwin"}.get(_SYSTEM, "linux")
+
+
+def build_tool_path(root: str, exe_name: str, plat: str) -> str:
+    """Build <root>/bin/<exe_name>, appending .exe on Windows if needed."""
+    exe = exe_name
+    if plat == "windows" and not exe.lower().endswith(".exe"):
+        exe = exe + ".exe"
+    return f"{root.rstrip('/')}/bin/{exe}"
+
+
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="luma-denoise RenderMan denoise wrapper")
-    parser.add_argument("--denoise-exe", required=True, dest="denoise_exe",
-                        help="Absolute path to denoise_batch.")
+    # Per-OS RenderMan tree roots (new, preferred)
+    parser.add_argument("--rmantree-windows", default="", dest="rmantree_windows",
+                        help="RMANTREE root path on Windows workers.")
+    parser.add_argument("--rmantree-linux", default="", dest="rmantree_linux",
+                        help="RMANTREE root path on Linux workers.")
+    parser.add_argument("--rmantree-darwin", default="", dest="rmantree_darwin",
+                        help="RMANTREE root path on macOS workers.")
+    parser.add_argument("--denoise-exe-name", default="denoise_batch",
+                        dest="denoise_exe_name",
+                        help="Name of the denoise_batch executable in <RMANTREE>/bin.")
+    parser.add_argument("--pixar-license", default="", dest="pixar_license",
+                        help="PIXAR_LICENSE_FILE value (e.g. 9010@licserver).")
+    # Legacy resolved-path flag (optional fallback)
+    parser.add_argument("--denoise-exe", default="", dest="denoise_exe",
+                        help="Absolute path to denoise_batch (legacy fallback).")
     parser.add_argument("--input", required=True,
                         help="Path to the first frame of the raw sequence.")
     parser.add_argument("--output-dir", required=True, dest="output_dir",
@@ -68,8 +108,26 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
-def build_denoise_argv(args: argparse.Namespace) -> list:
-    argv = [args.denoise_exe, "-a", "0", "-v", "--clean-alpha", "--progress"]
+def resolve_denoise_exe(args: argparse.Namespace, plat: str | None = None):
+    """Return (exe_path, rmantree_root) for the current platform.
+
+    Prefers per-OS rmantree roots; falls back to --denoise-exe (legacy).
+    Raises RuntimeError if neither is available.
+    """
+    plat = plat or current_platform()
+    root = {"windows": args.rmantree_windows, "linux": args.rmantree_linux,
+            "darwin": args.rmantree_darwin}.get(plat, "")
+    if root:
+        return build_tool_path(root, args.denoise_exe_name, plat), root
+    if args.denoise_exe:
+        return args.denoise_exe, ""
+    raise RuntimeError(
+        f"renderman_denoise: no RenderMan root for platform '{plat}'. "
+        "Set denoise.renderman.rmantree_path for this OS.")
+
+
+def build_denoise_argv(args: argparse.Namespace, denoise_exe: str) -> list:
+    argv = [denoise_exe, "-a", "0", "-v", "--clean-alpha", "--progress"]
     if args.cross_frame:
         argv.append("-cf")
     if args.tiles:
@@ -149,13 +207,28 @@ def main(argv: Sequence[str] | None = None) -> int:
     except ValueError as exc:
         print(f"[renderman_denoise] ERROR: {exc}", file=sys.stderr)
         return 1
-    denoise_argv = build_denoise_argv(args)
+
+    try:
+        denoise_exe, root = resolve_denoise_exe(args)
+    except RuntimeError as exc:
+        print(f"[renderman_denoise] ERROR: {exc}", file=sys.stderr)
+        return 1
+
+    # Build subprocess environment with RMANTREE and license if available.
+    env = os.environ.copy()
+    if root:
+        env["RMANTREE"] = root
+        env["PATH"] = f"{root}/bin" + os.pathsep + env.get("PATH", "")
+    if args.pixar_license:
+        env["PIXAR_LICENSE_FILE"] = args.pixar_license
+
+    denoise_argv = build_denoise_argv(args, denoise_exe)
 
     if args.verbose:
         print(f"[renderman_denoise] running: {' '.join(denoise_argv)}")
 
     result = subprocess.run(
-        denoise_argv, capture_output=True, text=True, check=False)
+        denoise_argv, capture_output=True, text=True, check=False, env=env)
     if result.stdout:
         print(result.stdout)
     if result.stderr:
