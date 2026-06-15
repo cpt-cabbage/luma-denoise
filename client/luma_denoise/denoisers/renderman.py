@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import os
 
-from .base import ADDON_VERSION, DenoiserBackend, quote
+from .base import ADDON_VERSION, DenoiserBackend, quote, resolve_platform_value
 
 
 class RendermanDenoiser(DenoiserBackend):
@@ -23,9 +23,12 @@ class RendermanDenoiser(DenoiserBackend):
         frame_start = int(instance.data.get("frameStartHandle", 1))
         frame_end = int(instance.data.get("frameEndHandle", 1))
 
-        rman_root = rm_settings.get(
-            "rmantree_path", "/opt/pixar/RenderManProServer-26.3")
-        exe_name = rm_settings.get("denoise_exe", "denoise_batch")
+        platform_key = self._worker_platform(settings)
+        rman_root = resolve_platform_value(
+            rm_settings.get("rmantree_path", ""), platform_key
+        ) or "/opt/pixar/RenderManProServer-26.3"
+        exe_name = resolve_platform_value(
+            rm_settings.get("denoise_exe", ""), platform_key) or "denoise_batch"
         denoise_exe = f"{rman_root}/bin/{exe_name}"
 
         wrapper_path = self._resolve_wrapper_path(settings)
@@ -49,8 +52,10 @@ class RendermanDenoiser(DenoiserBackend):
 
     def get_environment(self, settings: dict) -> dict:
         rm_settings = self._backend_settings(settings)
+        platform_key = self._worker_platform(settings)
         env = {}
-        rman_root = rm_settings.get("rmantree_path", "")
+        rman_root = resolve_platform_value(
+            rm_settings.get("rmantree_path", ""), platform_key)
         if rman_root:
             env["RMANTREE"] = rman_root
             env["PATH"] = f"{rman_root}/bin"

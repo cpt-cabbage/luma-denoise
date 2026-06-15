@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import os
 
-from .base import ADDON_VERSION, DenoiserBackend, quote
+from .base import ADDON_VERSION, DenoiserBackend, quote, resolve_platform_value
 
 
 class OidnDenoiser(DenoiserBackend):
@@ -28,14 +28,19 @@ class OidnDenoiser(DenoiserBackend):
         frame_start = int(instance.data.get("frameStartHandle", 1))
         frame_end = int(instance.data.get("frameEndHandle", 1))
 
-        oidn_root = oidn_settings.get("oidn_root_path", "/opt/oidn")
-        exe_name = oidn_settings.get("denoise_exe", "oidnDenoise")
+        platform_key = self._worker_platform(settings)
+        oidn_root = resolve_platform_value(
+            oidn_settings.get("oidn_root_path", ""), platform_key) or "/opt/oidn"
+        exe_name = resolve_platform_value(
+            oidn_settings.get("denoise_exe", ""), platform_key) or "oidnDenoise"
         oidn_exe = f"{oidn_root}/bin/{exe_name}"
 
         # The extraction tool is the same OIIO install the combine step uses.
         shared = settings.get("shared", {}) or {}
-        oiio_root = shared.get("oiio_root_path", "/opt/oiio")
-        oiio_exe = shared.get("oiio_exe", "oiiotool")
+        oiio_root = resolve_platform_value(
+            shared.get("oiio_root_path", ""), platform_key) or "/opt/oiio"
+        oiio_exe = resolve_platform_value(
+            shared.get("oiio_exe", ""), platform_key) or "oiiotool"
         oiiotool = f"{oiio_root}/bin/{oiio_exe}"
 
         wrapper_path = self._resolve_wrapper_path(settings)
@@ -59,8 +64,10 @@ class OidnDenoiser(DenoiserBackend):
 
     def get_environment(self, settings: dict) -> dict:
         oidn_settings = self._backend_settings(settings)
+        platform_key = self._worker_platform(settings)
         env = {}
-        oidn_root = oidn_settings.get("oidn_root_path", "")
+        oidn_root = resolve_platform_value(
+            oidn_settings.get("oidn_root_path", ""), platform_key)
         if oidn_root:
             env["PATH"] = f"{oidn_root}/bin"
         return env
