@@ -31,11 +31,18 @@ def test_quote_adds_quotes_only_when_needed():
     assert base.quote('"/already quoted/p.py"') == '"/already quoted/p.py"'
 
 
-def test_base_get_executable_returns_python_executable():
+def test_base_get_executable_reads_backend_python():
     backend = base.DenoiserBackend()
+    backend.name = "oidn"
     assert backend.get_executable(
-        {"shared": {"python_executable": "/usr/bin/python3"}}) == "/usr/bin/python3"
+        {"denoise": {"oidn": {"python_executable": "/usr/bin/python3"}}}) == "/usr/bin/python3"
     assert backend.get_executable({}) == "python"
+
+
+def test_join_bin_joins_root_and_exe():
+    assert base.join_bin("/opt/oidn", "oidnDenoise") == "/opt/oidn/bin/oidnDenoise"
+    assert base.join_bin("/opt/oidn/", "oidnDenoise") == "/opt/oidn/bin/oidnDenoise"
+    assert base.join_bin("C:/oiio", "oiiotool.exe") == "C:/oiio/bin/oiiotool.exe"
 
 
 def test_base_resolve_wrapper_path_substitutes_version():
@@ -77,29 +84,6 @@ def test_resolve_wrapper_path_empty_raises():
         base.resolve_wrapper_path({"shared": {"scripts_directory": ""}},
                                   "renderman_denoise.py")
 
-
-def test_resolve_platform_value_dict_and_passthrough():
-    assert base.resolve_platform_value(
-        {"windows": "a.exe", "linux": "a", "darwin": ""}, "windows") == "a.exe"
-    assert base.resolve_platform_value(
-        {"windows": "a.exe", "linux": "a", "darwin": ""}, "darwin") == ""
-    assert base.resolve_platform_value("plain", "linux") == "plain"
-    assert base.resolve_platform_value(None, "linux") == ""
-
-
-def test_platform_triplet_args_from_dict_omits_empty():
-    out = base.DenoiserBackend.platform_triplet_args(
-        "rmantree", {"windows": "C:/RMP", "linux": "/opt/rmp", "darwin": ""})
-    # Empty darwin value is omitted entirely (no empty token emitted).
-    assert out == ["--rmantree-windows", "C:/RMP",
-                   "--rmantree-linux", "/opt/rmp"]
-
-
-def test_platform_triplet_args_from_plain_string():
-    out = base.DenoiserBackend.platform_triplet_args("oidn-root", "/opt/oidn")
-    assert out == ["--oidn-root-windows", "/opt/oidn",
-                   "--oidn-root-linux", "/opt/oidn",
-                   "--oidn-root-darwin", "/opt/oidn"]
 
 
 from denoisers.renderman import RendermanDenoiser  # noqa: E402

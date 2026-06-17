@@ -22,15 +22,9 @@ def quote(value: str) -> str:
     return value
 
 
-def resolve_platform_value(value, worker_platform: str) -> str:
-    """Resolve a multiplatform settings value for a worker platform.
-
-    Accepts the {windows, linux, darwin} dict shape (AYON multiplatform
-    path); plain strings pass through so pre-0.4.0 values keep working.
-    """
-    if isinstance(value, dict):
-        return value.get(worker_platform, "") or ""
-    return value or ""
+def join_bin(root: str, exe: str) -> str:
+    """Join an install root with bin/<exe>, used verbatim (no .exe magic)."""
+    return f"{root.rstrip('/')}/bin/{exe}"
 
 
 def resolve_wrapper_path(settings: dict, filename: str) -> str:
@@ -69,14 +63,12 @@ class DenoiserBackend:
     requires_combine = True
 
     def get_executable(self, settings: dict) -> str:
-        """Executable for the Deadline job — the worker Python.
+        """Executable for the Deadline job — the backend's worker Python.
 
-        Both current backends run Python wrapper scripts, so this is the
-        same ``shared.python_executable`` setting the combine wrapper uses.
-        Single value — Deadline Path Mapping translates it per worker OS.
+        Single value for the backend's single-OS pool (resolved at submit).
         """
-        shared = settings.get("shared", {}) or {}
-        return shared.get("python_executable", "python") or "python"
+        return self._backend_settings(settings).get(
+            "python_executable", "python") or "python"
 
     def get_arguments(self, instance, settings: dict) -> str:
         """Full Arguments string for the Deadline CommandLine plugin."""
@@ -98,27 +90,6 @@ class DenoiserBackend:
 
     def _resolve_wrapper_path(self, settings: dict) -> str:
         return resolve_wrapper_path(settings, self.wrapper_filename)
-
-    @staticmethod
-    def platform_triplet_args(prefix: str, value) -> list:
-        """Emit ['--<prefix>-<plat>', v, ...] for each NON-EMPTY per-OS value
-        from a {windows,linux,darwin} dict (or a plain string applied to all
-        three). Empty values are OMITTED entirely — the wrapper's argparse
-        defaults them to "" — which avoids emitting empty command-line tokens
-        (a literal '""' could be read back as a truthy 2-char string and
-        mask a 'no root for this platform' error)."""
-        if isinstance(value, dict):
-            vals = {p: (value.get(p, "") or "") for p in
-                    ("windows", "linux", "darwin")}
-        else:
-            v = value or ""
-            vals = {"windows": v, "linux": v, "darwin": v}
-        out = []
-        for p in ("windows", "linux", "darwin"):
-            v = vals[p]
-            if v:
-                out.extend([f"--{prefix}-{p}", quote(v)])
-        return out
 
     def rename_pair_args(self, settings: dict) -> list:
         """Backend's beauty_rename_map as ['--rename', 'SRC=DST', ...].
