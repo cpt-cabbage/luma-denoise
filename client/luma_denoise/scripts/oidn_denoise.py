@@ -17,9 +17,9 @@ After the last frame a sequence-level <name>.denoise.json sidecar is written
 describing the output channel naming; oiio_combine.py reads it downstream.
 
 Standalone by design: deploy this single file to a shared filesystem (the
-'oidn.wrapper_script_path' luma-denoise setting points at it). The channel
-reading block mirrors oiio_combine.py on purpose - wrappers do not import
-each other.
+'shared.scripts_directory' luma-denoise setting points at the folder that
+holds it). The channel reading block mirrors oiio_combine.py on purpose -
+wrappers do not import each other.
 
 Usage (per-OS roots, preferred):
     python oidn_denoise.py

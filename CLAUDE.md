@@ -33,7 +33,7 @@ Run tests with `python -m pytest tests -v` (no linter or CI pipeline). Python ta
 
 ## Version Management
 
-Single source of truth: `package.py` (`version = "0.0.10"`).
+Single source of truth: `package.py` (`version = "0.6.0"`).
 
 `create_package.py` auto-generates `client/luma_denoise/version.py` at build time from `package.py`, so you only need to update `package.py` when bumping versions.
 
@@ -42,7 +42,7 @@ Single source of truth: `package.py` (`version = "0.0.10"`).
 ### Server Side (`server/`)
 
 - `__init__.py` — `LumaDenoiseAddon(BaseServerAddon)` with `LumaDenoiseSettings` as its settings model. No custom endpoints.
-- `settings.py` — Pydantic settings model with three groups: Denoising (denoiser dropdown + per-backend config incl. beauty rename maps), OIIO Combine (combine job + pass-through rename map), Shared Tools (worker python, OIIO paths). Tool install roots (RenderMan/OIDN/OIIO) are per-OS (windows/linux/darwin) and resolved on the worker at runtime; wrapper/python/library paths are single values handled by Deadline Path Mapping. No submit-time platform choice.
+- `settings.py` — Pydantic settings model with three groups: Denoising (denoiser dropdown + per-backend config incl. beauty rename maps), OIIO Combine (combine job + pass-through rename map), Shared Tools (worker python, OIIO paths, and a single **Wrapper Scripts Directory**). Tool install roots (RenderMan/OIDN/OIIO) are per-OS (windows/linux/darwin) and resolved on the worker at runtime; python/library paths are single values handled by Deadline Path Mapping. The three wrapper scripts (`renderman_denoise.py`, `oidn_denoise.py`, `oiio_combine.py`) all live in `shared.scripts_directory` — the addon appends each fixed filename at runtime. No submit-time platform choice.
 
 ### Client Side (`client/luma_denoise/`)
 
@@ -86,8 +86,8 @@ setting). Each backend runs a standalone wrapper script from
 Both wrappers write a `<seq>.denoise.json` sidecar next to the denoised
 frames; `oiio_combine.py` reads it for the beauty rename map (falling back
 to the active backend's `beauty_rename_map` setting when absent). Wrapper scripts
-deploy to a shared filesystem; per-backend `wrapper_script_path` settings
-locate them ({version} token supported).
+deploy to a single shared folder named by the `shared.scripts_directory` setting
+({version} token supported); the addon appends each wrapper's fixed filename.
 
 ### Launcher Actions (`client/luma_denoise/plugins/actions/`)
 

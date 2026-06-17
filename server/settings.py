@@ -75,16 +75,6 @@ class RendermanDenoiserSettings(BaseSettingsModel):
         ),
     )
 
-    wrapper_script_path: str = SettingsField(
-        "",
-        title="RenderMan Wrapper Script Path (renderman_denoise.py)",
-        description=(
-            "Absolute path to renderman_denoise.py on the shared library. "
-            "Single value - Deadline Path Mapping translates it per worker "
-            "OS. Supports the {version} token. MUST be set."
-        ),
-    )
-
     beauty_rename_map: list[ChannelRenamePair] = SettingsField(
         default_factory=lambda: [
             ChannelRenamePair(source="Ci.r", target="R"),
@@ -121,16 +111,6 @@ class OidnDenoiserSettings(BaseSettingsModel):
         description=(
             "Name of the OIDN executable in <root>/bin (the wrapper "
             "appends .exe on Windows)."
-        ),
-    )
-
-    wrapper_script_path: str = SettingsField(
-        "",
-        title="OIDN Wrapper Script Path (oidn_denoise.py)",
-        description=(
-            "Absolute path to oidn_denoise.py on the shared library. "
-            "Single value - Deadline Path Mapping translates it per worker "
-            "OS. Supports the {version} token. MUST be set."
         ),
     )
 
@@ -258,16 +238,6 @@ class CombineSettings(BaseSettingsModel):
         description="Group of the combine Deadline job.",
     )
 
-    wrapper_script_path: str = SettingsField(
-        "",
-        title="Combine Wrapper Script Path (oiio_combine.py)",
-        description=(
-            "Absolute path to oiio_combine.py on the shared library. "
-            "Single value - Deadline Path Mapping translates it per worker "
-            "OS. Supports the {version} token. MUST be set."
-        ),
-    )
-
     run_when_denoise_disabled: bool = SettingsField(
         False,
         title="Run Combine when denoise is disabled",
@@ -380,6 +350,17 @@ class SharedToolsSettings(BaseSettingsModel):
             "Python that Deadline launches for ALL wrapper scripts (denoise "
             "and combine). Single value - must resolve on every worker's "
             "PATH, or be a Path-Mapped absolute path."
+        ),
+    )
+
+    scripts_directory: str = SettingsField(
+        "",
+        title="Wrapper Scripts Directory",
+        description=(
+            "Directory containing the luma-denoise wrapper scripts "
+            "(renderman_denoise.py, oidn_denoise.py, oiio_combine.py) on the "
+            "shared library. Single value - Deadline Path Mapping translates "
+            "it per worker OS. Supports the {version} token. MUST be set."
         ),
     )
 

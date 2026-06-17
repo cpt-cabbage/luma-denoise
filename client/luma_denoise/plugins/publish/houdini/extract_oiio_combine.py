@@ -6,12 +6,7 @@ import pyblish.api
 
 from ayon_core.pipeline import AYONPyblishPluginMixin
 from ayon_deadline import abstract_submit_deadline
-from luma_denoise.denoisers.base import DenoiserBackend
-
-try:
-    from luma_denoise.version import __version__ as _ADDON_VERSION
-except Exception:
-    _ADDON_VERSION = "unknown"
+from luma_denoise.denoisers.base import DenoiserBackend, resolve_wrapper_path
 
 
 # Default exclude patterns mirror the server settings default. Kept here as a
@@ -31,6 +26,9 @@ DEFAULT_RENAME_RAW: list[dict[str, str]] = [
     {"source": "beauty.b", "target": "B"},
     {"source": "a.Z", "target": "A"},
 ]
+
+# Wrapper filename is fixed by the addon; the directory comes from settings.
+WRAPPER_FILENAME = "oiio_combine.py"
 
 
 @dataclass
@@ -144,15 +142,7 @@ class ExtractOiioCombine(
         oiio_exe_name = shared_settings.get("oiio_exe", "oiiotool") or "oiiotool"
         python_exe = shared_settings.get("python_executable", "python") or "python"
 
-        wrapper_template = combine_settings.get("wrapper_script_path", "")
-        if not wrapper_template:
-            raise RuntimeError(
-                "luma-denoise: 'combine.wrapper_script_path' is not set. "
-                "Point it at oiio_combine.py on the shared library (Deadline "
-                "Path Mapping translates it per worker). Use the {version} "
-                "token for per-version paths."
-            )
-        wrapper_path = wrapper_template.replace("{version}", _ADDON_VERSION)
+        wrapper_path = resolve_wrapper_path(oiio_settings, WRAPPER_FILENAME)
 
         first_file = files[0]
         dirname = os.path.dirname(first_file).replace("\\", "/")
