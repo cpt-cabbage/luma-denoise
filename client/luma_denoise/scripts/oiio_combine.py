@@ -28,7 +28,6 @@ import argparse
 import fnmatch
 import json
 import os
-import platform as _platform_mod
 import re
 import shlex
 import subprocess
@@ -36,24 +35,6 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Sequence
-
-# Cache the platform string at import time so current_platform() never
-# calls subprocess internally (platform.system() on Windows uses 'ver').
-_SYSTEM = _platform_mod.system()
-
-
-def current_platform() -> str:
-    """Return the current platform as 'windows', 'linux', or 'darwin'."""
-    return {"Windows": "windows", "Linux": "linux",
-            "Darwin": "darwin"}.get(_SYSTEM, "linux")
-
-
-def build_tool_path(root: str, exe_name: str, plat: str) -> str:
-    """Build <root>/bin/<exe_name>, appending .exe on Windows if needed."""
-    exe = exe_name
-    if plat == "windows" and not exe.lower().endswith(".exe"):
-        exe = exe + ".exe"
-    return f"{root.rstrip('/')}/bin/{exe}"
 
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
@@ -67,17 +48,8 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
                         help="Path to the raw (pre-denoise) EXR for this frame.")
     parser.add_argument("--output", required=True,
                         help="Path to write the combined EXR to.")
-    parser.add_argument("--oiiotool", default="",
-                        help="Absolute path to the oiiotool executable "
-                             "(legacy fallback; prefer per-OS root flags).")
-    parser.add_argument("--oiio-root-windows", default="", dest="oiio_root_windows",
-                        help="OIIO install root on Windows workers.")
-    parser.add_argument("--oiio-root-linux", default="", dest="oiio_root_linux",
-                        help="OIIO install root on Linux workers.")
-    parser.add_argument("--oiio-root-darwin", default="", dest="oiio_root_darwin",
-                        help="OIIO install root on macOS workers.")
-    parser.add_argument("--oiio-exe-name", default="oiiotool", dest="oiio_exe_name",
-                        help="Name of the oiiotool executable in <OIIO root>/bin.")
+    parser.add_argument("--oiiotool", required=True,
+                        help="Absolute path to oiiotool on the worker.")
     parser.add_argument("--exclude", action="append", default=[],
                         metavar="PATTERN",
                         help="fnmatch glob pattern. Raw channels matching are "
@@ -474,16 +446,6 @@ def main(argv: Sequence[str] | None = None) -> int:
 
 
 def _run(args: argparse.Namespace) -> int:
-    # Resolve oiiotool path: prefer per-OS root; fall back to --oiiotool legacy flag.
-    plat = current_platform()
-    root = {"windows": args.oiio_root_windows, "linux": args.oiio_root_linux,
-            "darwin": args.oiio_root_darwin}.get(plat, "")
-    oiiotool = build_tool_path(root, args.oiio_exe_name, plat) if root else args.oiiotool
-    if not oiiotool:
-        raise RuntimeError(
-            f"oiio_combine: no OIIO root for platform '{plat}'.")
-    args.oiiotool = oiiotool
-
     pass_through = (args.denoised == args.raw)
 
     if args.verbose:
