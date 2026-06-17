@@ -10,3 +10,5 @@ frontend/.env
 frontend/yarn.lock
 frontend/yarn-error.log
 .claude/settings.local.json
+# Claude Code local workspace (agent worktrees, transcripts, local state)
+.claude/
