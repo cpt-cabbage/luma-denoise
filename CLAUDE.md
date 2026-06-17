@@ -33,7 +33,7 @@ Run tests with `python -m pytest tests -v` (no linter or CI pipeline). Python ta
 
 ## Version Management
 
-Single source of truth: `package.py` (`version = "0.6.0"`).
+Single source of truth: `package.py` (`version = "0.7.0"`).
 
 `create_package.py` auto-generates `client/luma_denoise/version.py` at build time from `package.py`, so you only need to update `package.py` when bumping versions.
 
@@ -42,7 +42,7 @@ Single source of truth: `package.py` (`version = "0.6.0"`).
 ### Server Side (`server/`)
 
 - `__init__.py` — `LumaDenoiseAddon(BaseServerAddon)` with `LumaDenoiseSettings` as its settings model. No custom endpoints.
-- `settings.py` — Pydantic settings model with three groups: Denoising (denoiser dropdown + per-backend config incl. beauty rename maps), OIIO Combine (combine job + pass-through rename map), Shared Tools (worker python, OIIO paths, and a single **Wrapper Scripts Directory**). Tool install roots (RenderMan/OIDN/OIIO) are per-OS (windows/linux/darwin) and resolved on the worker at runtime; python/library paths are single values handled by Deadline Path Mapping. The three wrapper scripts (`renderman_denoise.py`, `oidn_denoise.py`, `oiio_combine.py`) all live in `shared.scripts_directory` — the addon appends each fixed filename at runtime. No submit-time platform choice.
+- `settings.py` — Pydantic settings model with three groups: Denoising (denoiser dropdown + per-backend config incl. beauty rename maps), OIIO Combine (combine job + pass-through rename map), Shared Tools (`scripts_directory` only). Tool paths are per-step single values for each step's single-OS pool: RenderMan has `rmantree_path`; OIDN has `python_executable`/`oidn_root_path`/`oiio_root_path`; combine has `python_executable`/`oiio_root_path`. Shared Tools holds only `scripts_directory` (for wrapper scripts on the shared library). No per-OS dicts or worker-side resolution.
 
 ### Client Side (`client/luma_denoise/`)
 
@@ -76,18 +76,22 @@ Both `LumaDenoiseUsdRender` and `ExtractOiioCombine` extend `abstract_submit_dea
 
 The denoise step is abstracted behind `client/luma_denoise/denoisers/`
 (`DenoiserBackend` strategy classes, selected by the `denoiser` project
-setting). Each backend runs a standalone wrapper script from
-`client/luma_denoise/scripts/` on the Deadline worker:
+setting). Each step runs on its own single-OS pool with explicit single-value
+paths resolved at submit time:
 
-- `renderman` — `renderman_denoise.py` wraps Pixar `denoise_batch`
-- `oidn` — `oidn_denoise.py` extracts beauty/albedo/normal via oiiotool and
-  runs `oidnDenoise` (albedo + normal guide AOVs are REQUIRED in the render)
+- `renderman` — runs Pixar `denoise_batch` directly as the Deadline executable
+  (no Python wrapper; `renderman_denoise.py` has been removed). Env sets
+  `RMANTREE` and `PIXAR_LICENSE_FILE`.
+- `oidn` — runs `oidn_denoise.py` via its pool's `python_executable` with
+  resolved `--oidn-exe` and `--oiiotool` full paths. The wrapper extracts
+  beauty/albedo/normal via oiiotool, runs `oidnDenoise`, and reassembles.
+  Albedo + normal guide AOVs are REQUIRED in the render.
 
-Both wrappers write a `<seq>.denoise.json` sidecar next to the denoised
+The OIDN wrapper writes a `<seq>.denoise.json` sidecar next to the denoised
 frames; `oiio_combine.py` reads it for the beauty rename map (falling back
 to the active backend's `beauty_rename_map` setting when absent). Wrapper scripts
-deploy to a single shared folder named by the `shared.scripts_directory` setting
-({version} token supported); the addon appends each wrapper's fixed filename.
+deploy to a shared folder named by the `shared.scripts_directory` setting
+({version} token supported).
 
 ### Launcher Actions (`client/luma_denoise/plugins/actions/`)
 

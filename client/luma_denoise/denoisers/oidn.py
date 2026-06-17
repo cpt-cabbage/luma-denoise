@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import os
 
-from .base import ADDON_VERSION, DenoiserBackend, quote
+from .base import ADDON_VERSION, DenoiserBackend, join_bin, quote
 
 
 class OidnDenoiser(DenoiserBackend):
@@ -12,7 +12,8 @@ class OidnDenoiser(DenoiserBackend):
 
     OIDN cannot read packed multi-channel render EXRs; the wrapper script
     extracts beauty/albedo/normal per frame via oiiotool, runs oidnDenoise,
-    and reassembles the denoised frame.
+    and reassembles the denoised frame. Tool paths are single values for the
+    OIDN pool, resolved here at submit time.
     """
 
     name = "oidn"
@@ -21,7 +22,6 @@ class OidnDenoiser(DenoiserBackend):
 
     def get_arguments(self, instance, settings: dict) -> str:
         oidn_settings = self._backend_settings(settings)
-        shared = settings.get("shared", {}) or {}
         files = instance.data["files"]
         first_file = files[0]
         dirname = os.path.dirname(first_file).replace("\\", "/")
@@ -29,17 +29,17 @@ class OidnDenoiser(DenoiserBackend):
         frame_start = int(instance.data.get("frameStartHandle", 1))
         frame_end = int(instance.data.get("frameEndHandle", 1))
 
-        oidn_exe_name = oidn_settings.get("denoise_exe", "oidnDenoise") or "oidnDenoise"
-        oiio_exe_name = shared.get("oiio_exe", "oiiotool") or "oiiotool"
+        oidn_exe = join_bin(
+            oidn_settings.get("oidn_root_path", ""),
+            oidn_settings.get("denoise_exe", "oidnDenoise") or "oidnDenoise")
+        oiiotool = join_bin(
+            oidn_settings.get("oiio_root_path", ""),
+            oidn_settings.get("oiio_exe", "oiiotool") or "oiiotool")
         wrapper_path = self._resolve_wrapper_path(settings)
 
         parts = [quote(wrapper_path)]
-        parts.extend(self.platform_triplet_args(
-            "oidn-root", oidn_settings.get("oidn_root_path", "")))
-        parts.extend(["--oidn-exe-name", quote(oidn_exe_name)])
-        parts.extend(self.platform_triplet_args(
-            "oiio-root", shared.get("oiio_root_path", "")))
-        parts.extend(["--oiio-exe-name", quote(oiio_exe_name)])
+        parts.extend(["--oidn-exe", quote(oidn_exe)])
+        parts.extend(["--oiiotool", quote(oiiotool)])
         parts.extend([
             "--input", quote(f"{dirname}/{basename}"),
             "--output-dir", quote(f"{dirname}/denoised"),
@@ -60,6 +60,11 @@ class OidnDenoiser(DenoiserBackend):
     def validate(self, instance, settings: dict) -> None:
         self._resolve_wrapper_path(settings)
         oidn_settings = self._backend_settings(settings)
+        for field in ("oidn_root_path", "oiio_root_path"):
+            if not oidn_settings.get(field, ""):
+                raise RuntimeError(
+                    f"luma-denoise: 'denoise.oidn.{field}' is not set. Point "
+                    "it at the install root on the OIDN pool.")
         for field in ("beauty_channel", "albedo_channel", "normal_channel"):
             if not oidn_settings.get(field, ""):
                 raise RuntimeError(

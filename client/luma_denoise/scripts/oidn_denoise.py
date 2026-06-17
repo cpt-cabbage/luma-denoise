@@ -21,24 +21,15 @@ Standalone by design: deploy this single file to a shared filesystem (the
 holds it). The channel reading block mirrors oiio_combine.py on purpose -
 wrappers do not import each other.
 
-Usage (per-OS roots, preferred):
+Usage (the submission resolves these absolute paths for the OIDN pool):
     python oidn_denoise.py
-        --oidn-root-linux /opt/oidn  --oidn-root-windows C:/oidn --oidn-root-darwin ""
-        --oidn-exe-name oidnDenoise
-        --oiio-root-linux /opt/oiio  --oiio-root-windows C:/oiio --oiio-root-darwin ""
-        --oiio-exe-name oiiotool
+        --oidn-exe <path/to/oidnDenoise>
+        --oiiotool <path/to/oiiotool>
         --input <first-frame.exr> --output-dir <dir>
         --frame-start N --frame-end N
         --beauty-channel beauty --albedo-channel albedo --normal-channel N
         [--addon-version V] [--keep-temps] [--verbose]
-
-Usage (legacy resolved paths, kept for backwards compat):
-    python oidn_denoise.py
-        --oidn-exe <path> --oiiotool <path>
-        --input <first-frame.exr> --output-dir <dir>
-        --frame-start N --frame-end N
-        --beauty-channel beauty --albedo-channel albedo --normal-channel N
-        [--addon-version V] [--keep-temps] [--verbose]
+        [--rename SRC=DST ...]
 """
 
 from __future__ import annotations
@@ -46,7 +37,6 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import platform as _platform_mod
 import re
 import shutil
 import subprocess
@@ -57,56 +47,17 @@ from typing import Sequence
 
 _FRAME_RE = re.compile(r"\.(\d{3,})(?=\.[A-Za-z0-9]+$)")
 
-# Cache the platform string at import time so current_platform() never
-# calls subprocess internally (platform.system() on Windows uses 'ver').
-_SYSTEM = _platform_mod.system()
-
 # The combine step appends 'a.Z' (alpha) from the raw render; map it to A.
 DEFAULT_ALPHA_RENAME = {"a.Z": "A"}
-
-
-def current_platform() -> str:
-    """Return the current platform as 'windows', 'linux', or 'darwin'."""
-    return {"Windows": "windows", "Linux": "linux",
-            "Darwin": "darwin"}.get(_SYSTEM, "linux")
-
-
-def build_tool_path(root: str, exe_name: str, plat: str) -> str:
-    """Build <root>/bin/<exe_name>, appending .exe on Windows if needed."""
-    exe = exe_name
-    if plat == "windows" and not exe.lower().endswith(".exe"):
-        exe = exe + ".exe"
-    return f"{root.rstrip('/')}/bin/{exe}"
 
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="luma-denoise OIDN denoise wrapper")
-    # Per-OS OIDN roots (new, preferred)
-    parser.add_argument("--oidn-root-windows", default="", dest="oidn_root_windows",
-                        help="OIDN install root path on Windows workers.")
-    parser.add_argument("--oidn-root-linux", default="", dest="oidn_root_linux",
-                        help="OIDN install root path on Linux workers.")
-    parser.add_argument("--oidn-root-darwin", default="", dest="oidn_root_darwin",
-                        help="OIDN install root path on macOS workers.")
-    parser.add_argument("--oidn-exe-name", default="oidnDenoise",
-                        dest="oidn_exe_name",
-                        help="Name of the oidnDenoise executable in <OIDN root>/bin.")
-    # Per-OS OIIO roots (new, preferred)
-    parser.add_argument("--oiio-root-windows", default="", dest="oiio_root_windows",
-                        help="OIIO install root path on Windows workers.")
-    parser.add_argument("--oiio-root-linux", default="", dest="oiio_root_linux",
-                        help="OIIO install root path on Linux workers.")
-    parser.add_argument("--oiio-root-darwin", default="", dest="oiio_root_darwin",
-                        help="OIIO install root path on macOS workers.")
-    parser.add_argument("--oiio-exe-name", default="oiiotool",
-                        dest="oiio_exe_name",
-                        help="Name of the oiiotool executable in <OIIO root>/bin.")
-    # Legacy resolved-path flags (optional fallback)
-    parser.add_argument("--oidn-exe", default="", dest="oidn_exe",
-                        help="Absolute path to oidnDenoise (legacy fallback).")
-    parser.add_argument("--oiiotool", default="",
-                        help="Absolute path to oiiotool (legacy fallback).")
+    parser.add_argument("--oidn-exe", required=True, dest="oidn_exe",
+                        help="Absolute path to oidnDenoise on the worker.")
+    parser.add_argument("--oiiotool", required=True, dest="oiiotool",
+                        help="Absolute path to oiiotool on the worker.")
     parser.add_argument("--input", required=True,
                         help="Path to the first frame of the raw sequence.")
     parser.add_argument("--output-dir", required=True, dest="output_dir",
@@ -136,35 +87,6 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
                              "Default: derived from the beauty layer channels "
                              "plus a.Z->A.")
     return parser.parse_args(argv)
-
-
-def _pick_root(args: argparse.Namespace, prefix: str, plat: str) -> str:
-    """Return the root for the given tool prefix and platform string."""
-    return getattr(args, f"{prefix}_{plat}", "")
-
-
-def resolve_tools(args: argparse.Namespace, plat: str | None = None):
-    """Return (oidn_exe, oiiotool, oidn_root) for the current platform.
-
-    Prefers per-OS install roots; falls back to legacy --oidn-exe/--oiiotool.
-    Raises RuntimeError if neither is available for a required tool.
-    """
-    plat = plat or current_platform()
-    oidn_root = _pick_root(args, "oidn_root", plat)
-    oiio_root = _pick_root(args, "oiio_root", plat)
-    oidn_exe = (build_tool_path(oidn_root, args.oidn_exe_name, plat)
-                if oidn_root else args.oidn_exe)
-    oiiotool = (build_tool_path(oiio_root, args.oiio_exe_name, plat)
-                if oiio_root else args.oiiotool)
-    if not oidn_exe:
-        raise RuntimeError(
-            f"oidn_denoise: no OIDN root for platform '{plat}'. "
-            "Set denoise.oidn.oidn_root_path for this OS.")
-    if not oiiotool:
-        raise RuntimeError(
-            f"oidn_denoise: no OIIO root for platform '{plat}'. "
-            "Set shared.oiio_root_path for this OS.")
-    return oidn_exe, oiiotool, oidn_root
 
 
 # -- channel reading (mirrors oiio_combine.py; standalone on purpose) -----
@@ -402,13 +324,10 @@ def _run(args: argparse.Namespace) -> int:
             f"frame_start ({args.frame_start}) > frame_end "
             f"({args.frame_end}) - nothing to denoise.")
 
-    oidn_exe, oiiotool, oidn_root = resolve_tools(args)
-    args.oidn_exe = oidn_exe
-    args.oiiotool = oiiotool
-
     env = os.environ.copy()
-    if oidn_root:
-        env["PATH"] = oidn_root.rstrip("/") + "/bin" + os.pathsep + env.get("PATH", "")
+    bin_dir = os.path.dirname(args.oidn_exe.replace("\\", "/"))
+    if bin_dir:
+        env["PATH"] = bin_dir + os.pathsep + env.get("PATH", "")
 
     output_dir = args.output_dir.replace("\\", "/")
     os.makedirs(output_dir, exist_ok=True)

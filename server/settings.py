@@ -27,26 +27,17 @@ def _output_data_type_enum():
     return ["preserve", "float", "half"]
 
 
-class MultiplatformPathModel(BaseSettingsModel):
-    """One value per worker platform, resolved on the worker at runtime."""
-    windows: str = SettingsField("", title="Windows")
-    linux: str = SettingsField("", title="Linux")
-    darwin: str = SettingsField("", title="macOS")
-
 
 class RendermanDenoiserSettings(BaseSettingsModel):
     """Pixar RenderMan denoise_batch backend."""
 
-    rmantree_path: MultiplatformPathModel = SettingsField(
-        default_factory=lambda: MultiplatformPathModel(
-            windows="C:/Program Files/Pixar/RenderManProServer-26.3",
-            linux="/opt/pixar/RenderManProServer-26.3",
-            darwin="/Applications/Pixar/RenderManProServer-26.3",
-        ),
-        title="RenderMan Root Path",
+    rmantree_path: str = SettingsField(
+        "/opt/pixar/RenderManProServer-26.3",
+        title="RenderMan Root Path (RMANTREE)",
         description=(
-            "Path to RMANTREE per worker OS. Resolved on the worker at "
-            "runtime (these installs aren't in Deadline Path Mapping)."
+            "RMANTREE install root on the denoise pool. The denoise job runs "
+            "<RMANTREE>/bin/<denoise_exe> directly (no Python). Single value "
+            "for this step's single-OS pool."
         ),
     )
 
@@ -54,8 +45,9 @@ class RendermanDenoiserSettings(BaseSettingsModel):
         "denoise_batch",
         title="Denoiser Executable Name",
         description=(
-            "Name of the RenderMan denoiser executable in <RMANTREE>/bin "
-            "(the wrapper appends .exe on Windows)."
+            "Name of the RenderMan denoiser executable in <RMANTREE>/bin, "
+            "joined verbatim (no .exe auto-append). Use 'denoise_batch' on "
+            "Linux, 'denoise_batch.exe' on a Windows denoise pool."
         ),
     )
 
@@ -95,14 +87,34 @@ class RendermanDenoiserSettings(BaseSettingsModel):
 class OidnDenoiserSettings(BaseSettingsModel):
     """Intel Open Image Denoise backend."""
 
-    oidn_root_path: MultiplatformPathModel = SettingsField(
-        default_factory=lambda: MultiplatformPathModel(linux="/opt/oidn"),
-        title="OIDN Root Path",
+    python_executable: str = SettingsField(
+        "python",
+        title="Python Executable (OIDN pool)",
         description=(
-            "Path to the OIDN install root per worker OS. Resolved on the "
-            "worker at runtime (these installs aren't in Deadline Path "
-            "Mapping)."
+            "Python that Deadline launches for oidn_denoise.py on the OIDN "
+            "pool. Single value for this step's single-OS pool."
         ),
+    )
+
+    oidn_root_path: str = SettingsField(
+        "/opt/oidn",
+        title="OIDN Root Path",
+        description="OIDN install root on the OIDN pool. Single value.",
+    )
+
+    oiio_root_path: str = SettingsField(
+        "/opt/oiio",
+        title="OIIO Root Path (OIDN pool)",
+        description=(
+            "OpenImageIO install root on the OIDN pool, used to extract "
+            "beauty/albedo/normal. Single value."
+        ),
+    )
+
+    oiio_exe: str = SettingsField(
+        "oiiotool",
+        title="oiiotool Executable Name (OIDN pool)",
+        description="oiiotool name in <OIIO root>/bin (e.g. oiiotool or oiiotool.exe).",
     )
 
     denoise_exe: str = SettingsField(
@@ -238,6 +250,27 @@ class CombineSettings(BaseSettingsModel):
         description="Group of the combine Deadline job.",
     )
 
+    python_executable: str = SettingsField(
+        "python",
+        title="Python Executable (combine pool)",
+        description=(
+            "Python that Deadline launches for oiio_combine.py on the combine "
+            "pool (Windows). Single value for this step's single-OS pool."
+        ),
+    )
+
+    oiio_root_path: str = SettingsField(
+        "C:/Program Files/OpenImageIO",
+        title="OIIO Root Path (combine pool)",
+        description="OpenImageIO install root on the combine pool. Single value.",
+    )
+
+    oiio_exe: str = SettingsField(
+        "oiiotool.exe",
+        title="oiiotool Executable Name (combine pool)",
+        description="oiiotool name in <OIIO root>/bin (e.g. oiiotool.exe on Windows).",
+    )
+
     run_when_denoise_disabled: bool = SettingsField(
         False,
         title="Run Combine when denoise is disabled",
@@ -341,45 +374,17 @@ class CombineSettings(BaseSettingsModel):
 
 
 class SharedToolsSettings(BaseSettingsModel):
-    """Tools used by more than one step (denoise extraction AND combine)."""
-
-    python_executable: str = SettingsField(
-        "python",
-        title="Python Executable (Deadline workers)",
-        description=(
-            "Python that Deadline launches for ALL wrapper scripts (denoise "
-            "and combine). Single value - must resolve on every worker's "
-            "PATH, or be a Path-Mapped absolute path."
-        ),
-    )
+    """Tools shared across steps via the path-mapped library share."""
 
     scripts_directory: str = SettingsField(
         "",
         title="Wrapper Scripts Directory",
         description=(
             "Directory containing the luma-denoise wrapper scripts "
-            "(renderman_denoise.py, oidn_denoise.py, oiio_combine.py) on the "
-            "shared library. Single value - Deadline Path Mapping translates "
-            "it per worker OS. Supports the {version} token. MUST be set."
-        ),
-    )
-
-    oiio_root_path: MultiplatformPathModel = SettingsField(
-        default_factory=lambda: MultiplatformPathModel(linux="/opt/oiio"),
-        title="OIIO Root Path",
-        description=(
-            "Path to the OpenImageIO install root per worker OS. Resolved on "
-            "the worker at runtime (used by the combine step and by OIDN "
-            "channel extraction; not in Deadline Path Mapping)."
-        ),
-    )
-
-    oiio_exe: str = SettingsField(
-        "oiiotool",
-        title="oiiotool Executable Name",
-        description=(
-            "Name of the oiiotool executable in <OIIO root>/bin (the "
-            "wrapper appends .exe on Windows)."
+            "(oidn_denoise.py, oiio_combine.py) on the shared library. Single "
+            "value - Deadline Path Mapping translates it per worker OS. "
+            "Supports the {version} token. MUST be set when using OIDN or the "
+            "OIIO combine step."
         ),
     )
 

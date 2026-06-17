@@ -4,15 +4,26 @@ from __future__ import annotations
 
 import os
 
-from .base import ADDON_VERSION, DenoiserBackend, quote
+from .base import DenoiserBackend, join_bin, quote
 
 
 class RendermanDenoiser(DenoiserBackend):
-    """Builds the Deadline job that runs renderman_denoise.py on the farm."""
+    """Builds the Deadline job that runs Pixar denoise_batch directly.
+
+    RenderMan's denoiser is a native executable, so the job launches it
+    directly (no Python wrapper). The combine step gets its beauty rename
+    map from this backend's beauty_rename_map setting.
+    """
 
     name = "renderman"
-    wrapper_filename = "renderman_denoise.py"
+    wrapper_filename = ""
     requires_combine = True
+
+    def get_executable(self, settings: dict) -> str:
+        rm = self._backend_settings(settings)
+        root = rm.get("rmantree_path", "")
+        exe = rm.get("denoise_exe", "denoise_batch") or "denoise_batch"
+        return join_bin(root, exe)
 
     def get_arguments(self, instance, settings: dict) -> str:
         rm_settings = self._backend_settings(settings)
@@ -23,37 +34,33 @@ class RendermanDenoiser(DenoiserBackend):
         frame_start = int(instance.data.get("frameStartHandle", 1))
         frame_end = int(instance.data.get("frameEndHandle", 1))
 
-        exe_name = rm_settings.get("denoise_exe", "denoise_batch") or "denoise_batch"
-        pixar_license = rm_settings.get("pixar_license", "")
-        wrapper_path = self._resolve_wrapper_path(settings)
-
-        parts = [quote(wrapper_path)]
-        parts.extend(self.platform_triplet_args(
-            "rmantree", rm_settings.get("rmantree_path", "")))
-        parts.extend(["--denoise-exe-name", quote(exe_name)])
-        if pixar_license:
-            parts.extend(["--pixar-license", quote(pixar_license)])
-        parts.extend([
-            "--input", quote(f"{dirname}/{basename}"),
-            "--output-dir", quote(f"{dirname}/denoised"),
-            "--frame-start", str(frame_start),
-            "--frame-end", str(frame_end),
-            "--addon-version", ADDON_VERSION,
-        ])
+        parts = ["-a", "0", "-v", "--clean-alpha", "--progress"]
         if self._frame_count(instance) >= 8:
-            parts.append("--cross-frame")
+            parts.append("-cf")
         if self.detect_large_image(instance, rm_settings):
             parts.extend(["--tiles", "2", "2"])
-        parts.extend(self.rename_pair_args(settings))
-        parts.append("--verbose")
+        parts.extend([
+            "-o", quote(f"{dirname}/denoised"),
+            quote(f"{dirname}/{basename}"),
+            f"{frame_start}-{frame_end}",
+        ])
         return " ".join(parts)
 
     def get_environment(self, settings: dict) -> dict:
-        return {}
+        rm = self._backend_settings(settings)
+        env = {"RMANTREE": rm.get("rmantree_path", "")}
+        license_value = rm.get("pixar_license", "")
+        if license_value:
+            env["PIXAR_LICENSE_FILE"] = license_value
+        return env
 
     def validate(self, instance, settings: dict) -> None:
-        # Raises with an actionable message when unset.
-        self._resolve_wrapper_path(settings)
+        rm = self._backend_settings(settings)
+        if not rm.get("rmantree_path", ""):
+            raise RuntimeError(
+                "luma-denoise: 'denoise.renderman.rmantree_path' is not set. "
+                "Point it at the RenderManProServer install on the denoise "
+                "pool so denoise_batch can be launched.")
 
     # -- frame counting --------------------------------------------------
 
