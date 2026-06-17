@@ -6,7 +6,7 @@ import pyblish.api
 
 from ayon_core.pipeline import AYONPyblishPluginMixin
 from ayon_deadline import abstract_submit_deadline
-from luma_denoise.denoisers.base import DenoiserBackend, resolve_wrapper_path
+from luma_denoise.denoisers.base import join_bin, resolve_wrapper_path
 
 
 # Default exclude patterns mirror the server settings default. Kept here as a
@@ -138,9 +138,10 @@ class ExtractOiioCombine(
         combine_settings = oiio_settings.get("combine", {}) or {}
         shared_settings = oiio_settings.get("shared", {}) or {}
 
-        oiio_root_value = shared_settings.get("oiio_root_path", "")
-        oiio_exe_name = shared_settings.get("oiio_exe", "oiiotool") or "oiiotool"
-        python_exe = shared_settings.get("python_executable", "python") or "python"
+        oiiotool = join_bin(
+            combine_settings.get("oiio_root_path", ""),
+            combine_settings.get("oiio_exe", "oiiotool") or "oiiotool")
+        python_exe = combine_settings.get("python_executable", "python") or "python"
 
         wrapper_path = resolve_wrapper_path(oiio_settings, WRAPPER_FILENAME)
 
@@ -202,8 +203,7 @@ class ExtractOiioCombine(
         parts.extend(["--denoised", self._quote(denoised_path)])
         parts.extend(["--raw", self._quote(renders_path)])
         parts.extend(["--output", self._quote(output_path)])
-        parts.extend(DenoiserBackend.platform_triplet_args("oiio-root", oiio_root_value))
-        parts.extend(["--oiio-exe-name", self._quote(oiio_exe_name)])
+        parts.extend(["--oiiotool", self._quote(oiiotool)])
         for pat in all_excludes:
             parts.extend(["--exclude", self._quote(pat)])
         parts.extend(["--num-default-excludes", str(num_defaults)])
