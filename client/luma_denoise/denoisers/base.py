@@ -33,6 +33,27 @@ def resolve_platform_value(value, worker_platform: str) -> str:
     return value or ""
 
 
+def resolve_wrapper_path(settings: dict, filename: str) -> str:
+    """Join shared.scripts_directory with a wrapper filename.
+
+    Reads the single scripts_directory setting (Deadline Path Mapping
+    translates it per worker), substitutes {version}, strips a trailing
+    slash, and appends the fixed wrapper filename. Raises with an
+    actionable message when the directory is unset.
+    """
+    shared = settings.get("shared", {}) or {}
+    directory = shared.get("scripts_directory", "")
+    if not directory:
+        raise RuntimeError(
+            "luma-denoise: 'shared.scripts_directory' is not set. Point it "
+            "at the folder containing the wrapper scripts on the shared "
+            "library (Deadline Path Mapping translates it per worker). Use "
+            "the {version} token for per-version paths."
+        )
+    directory = directory.replace("{version}", ADDON_VERSION).rstrip("/\\")
+    return f"{directory}/{filename}"
+
+
 class DenoiserBackend:
     """Base class for denoiser backends.
 
@@ -76,16 +97,7 @@ class DenoiserBackend:
         return denoise_settings.get(self.name, {}) or {}
 
     def _resolve_wrapper_path(self, settings: dict) -> str:
-        template = self._backend_settings(settings).get("wrapper_script_path", "")
-        if not template:
-            raise RuntimeError(
-                f"luma-denoise: 'denoise.{self.name}.wrapper_script_path' is "
-                "not set. Point it at "
-                f"{self.wrapper_filename or 'the wrapper script'} on the shared "
-                "library (Deadline Path Mapping translates it per worker). "
-                "Use the {version} token for per-version paths."
-            )
-        return template.replace("{version}", ADDON_VERSION)
+        return resolve_wrapper_path(settings, self.wrapper_filename)
 
     @staticmethod
     def platform_triplet_args(prefix: str, value) -> list:

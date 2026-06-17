@@ -54,6 +54,29 @@ def test_base_resolve_wrapper_path_empty_raises():
         backend._resolve_wrapper_path({"denoise": {"renderman": {"wrapper_script_path": ""}}})
 
 
+def test_resolve_wrapper_path_joins_dir_and_filename():
+    out = base.resolve_wrapper_path(
+        {"shared": {"scripts_directory": "L:/s/{version}"}},
+        "renderman_denoise.py")
+    assert "{version}" not in out
+    assert out.endswith("/renderman_denoise.py")
+
+
+def test_resolve_wrapper_path_strips_trailing_slash():
+    out = base.resolve_wrapper_path(
+        {"shared": {"scripts_directory": "L:/s/"}}, "oiio_combine.py")
+    assert out == "L:/s/oiio_combine.py"
+    out_bs = base.resolve_wrapper_path(
+        {"shared": {"scripts_directory": "L:/s\\"}}, "oiio_combine.py")
+    assert out_bs == "L:/s/oiio_combine.py"
+
+
+def test_resolve_wrapper_path_empty_raises():
+    with pytest.raises(RuntimeError, match="scripts_directory"):
+        base.resolve_wrapper_path({"shared": {"scripts_directory": ""}},
+                                  "renderman_denoise.py")
+
+
 def test_resolve_platform_value_dict_and_passthrough():
     assert base.resolve_platform_value(
         {"windows": "a.exe", "linux": "a", "darwin": ""}, "windows") == "a.exe"
