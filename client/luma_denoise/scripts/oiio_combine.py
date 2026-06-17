@@ -8,18 +8,14 @@ When --write-manifest is set, a single sequence-level <name>.combine.json
 sidecar is written next to the combined EXRs (frame token stripped from the
 sidecar name so all frames in a sequence write to the same file).
 
-Usage:
+Usage (the submission resolves the absolute oiiotool path for the combine pool):
     python oiio_combine.py
+        --oiiotool <path/to/oiiotool>
         --denoised <path> --raw <path> --output <path>
-        --oiio-root-linux /opt/oiio --oiio-root-windows C:/oiio --oiio-root-darwin ""
-        [--oiio-exe-name oiiotool]
         [--exclude PATTERN ...] [--rename SRC=DST ...]
         [--extra-args "..."] [--compression "zips"]
         [--data-type preserve|float|half]
         [--write-manifest] [--verbose]
-
-    Legacy (single resolved path, kept for backwards compat):
-        --oiiotool <path> --denoised <path> --raw <path> --output <path> ...
 """
 
 from __future__ import annotations
@@ -322,7 +318,8 @@ def _denoise_sidecar_path(denoised_path: str) -> Path:
     """Derive the denoise-manifest path from a per-frame denoised path.
 
     '<dir>/<name>.<NNNN>.<ext>' -> '<dir>/<name>.denoise.json'
-    Written by the denoise wrappers (renderman_denoise.py / oidn_denoise.py).
+    Written by oidn_denoise.py (the only denoiser that still writes a
+    denoise manifest; RenderMan runs denoise_batch directly).
     """
     p = Path(denoised_path)
     name = p.name

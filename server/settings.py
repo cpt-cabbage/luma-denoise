@@ -45,8 +45,9 @@ class RendermanDenoiserSettings(BaseSettingsModel):
         "denoise_batch",
         title="Denoiser Executable Name",
         description=(
-            "Name of the RenderMan denoiser executable in <RMANTREE>/bin "
-            "(the wrapper appends .exe on Windows)."
+            "Name of the RenderMan denoiser executable in <RMANTREE>/bin, "
+            "joined verbatim (no .exe auto-append). Use 'denoise_batch' on "
+            "Linux, 'denoise_batch.exe' on a Windows denoise pool."
         ),
     )
 

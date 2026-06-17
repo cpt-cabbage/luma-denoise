@@ -21,24 +21,15 @@ Standalone by design: deploy this single file to a shared filesystem (the
 holds it). The channel reading block mirrors oiio_combine.py on purpose -
 wrappers do not import each other.
 
-Usage (per-OS roots, preferred):
+Usage (the submission resolves these absolute paths for the OIDN pool):
     python oidn_denoise.py
-        --oidn-root-linux /opt/oidn  --oidn-root-windows C:/oidn --oidn-root-darwin ""
-        --oidn-exe-name oidnDenoise
-        --oiio-root-linux /opt/oiio  --oiio-root-windows C:/oiio --oiio-root-darwin ""
-        --oiio-exe-name oiiotool
+        --oidn-exe <path/to/oidnDenoise>
+        --oiiotool <path/to/oiiotool>
         --input <first-frame.exr> --output-dir <dir>
         --frame-start N --frame-end N
         --beauty-channel beauty --albedo-channel albedo --normal-channel N
         [--addon-version V] [--keep-temps] [--verbose]
-
-Usage (legacy resolved paths, kept for backwards compat):
-    python oidn_denoise.py
-        --oidn-exe <path> --oiiotool <path>
-        --input <first-frame.exr> --output-dir <dir>
-        --frame-start N --frame-end N
-        --beauty-channel beauty --albedo-channel albedo --normal-channel N
-        [--addon-version V] [--keep-temps] [--verbose]
+        [--rename SRC=DST ...]
 """
 
 from __future__ import annotations
