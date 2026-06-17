@@ -196,17 +196,16 @@ from denoisers.oidn import OidnDenoiser  # noqa: E402
 
 
 OIDN_SETTINGS = {
-    "shared": {
-        "python_executable": "/usr/bin/python3",
-        "scripts_directory": "L:/scripts/{version}",
-        "oiio_root_path": {"windows": "C:/oiio", "linux": "/opt/oiio", "darwin": ""},
-        "oiio_exe": "oiiotool",
-    },
+    "shared": {"scripts_directory": "L:/scripts/{version}"},
     "denoise": {
         "denoiser": "oidn",
         "oidn": {
-            "oidn_root_path": {"linux": "/opt/oidn", "windows": "", "darwin": ""},
+            "python_executable": "/usr/bin/python3",
+            "oidn_root_path": "/opt/oidn",
             "denoise_exe": "oidnDenoise",
+            "oiio_root_path": "/opt/oiio",
+            "oiio_exe": "oiiotool",
+            "wrapper_script_path": "",
             "beauty_channel": "beauty",
             "albedo_channel": "albedo",
             "normal_channel": "N",
@@ -233,16 +232,19 @@ def test_oidn_name_and_combine_flag():
     assert backend.wrapper_filename == "oidn_denoise.py"
 
 
+def test_oidn_executable_is_backend_python():
+    backend = OidnDenoiser()
+    assert backend.get_executable(OIDN_SETTINGS) == "/usr/bin/python3"
+
+
 def test_oidn_arguments():
     backend = OidnDenoiser()
     args = backend.get_arguments(make_instance(), OIDN_SETTINGS)
     assert args.startswith("L:/scripts/")
-    assert "--oidn-root-linux /opt/oidn" in args
-    assert "--oidn-exe-name oidnDenoise" in args
-    assert "--oiio-root-linux /opt/oiio" in args
-    assert "--oiio-exe-name oiiotool" in args
-    assert "--oidn-exe " not in args
-    assert "--oiiotool " not in args
+    assert "--oidn-exe /opt/oidn/bin/oidnDenoise" in args
+    assert "--oiiotool /opt/oiio/bin/oiiotool" in args
+    assert "--oidn-root" not in args
+    assert "--oiio-root" not in args
     assert "--input /renders/shot/main/shot_main.1001.exr" in args
     assert "--output-dir /renders/shot/main/denoised" in args
     assert "--frame-start 1001" in args
@@ -256,8 +258,7 @@ def test_oidn_arguments():
 
 def test_oidn_environment_returns_empty():
     backend = OidnDenoiser()
-    env = backend.get_environment(OIDN_SETTINGS)
-    assert env == {}
+    assert backend.get_environment(OIDN_SETTINGS) == {}
 
 
 def test_oidn_validate_requires_wrapper_path():
@@ -265,6 +266,13 @@ def test_oidn_validate_requires_wrapper_path():
     bad = _oidn_settings_with()
     bad["shared"]["scripts_directory"] = ""
     with pytest.raises(RuntimeError, match="scripts_directory"):
+        backend.validate(make_instance(), bad)
+
+
+def test_oidn_validate_requires_oidn_root():
+    backend = OidnDenoiser()
+    bad = _oidn_settings_with(oidn_root_path="")
+    with pytest.raises(RuntimeError, match="oidn_root_path"):
         backend.validate(make_instance(), bad)
 
 
