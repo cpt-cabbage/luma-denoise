@@ -90,16 +90,10 @@ from denoisers.renderman import RendermanDenoiser  # noqa: E402
 
 
 RM_SETTINGS = {
-    "shared": {
-        "python_executable": "/usr/bin/python3",
-        "scripts_directory": "L:/scripts/{version}",
-        "oiio_root_path": {"windows": "C:/oiio", "linux": "/opt/oiio", "darwin": ""},
-        "oiio_exe": "oiiotool",
-    },
     "denoise": {
         "denoiser": "renderman",
         "renderman": {
-            "rmantree_path": {"windows": "C:/Pixar/RMP", "linux": "/opt/pixar/RenderManProServer-26.3", "darwin": ""},
+            "rmantree_path": "/opt/pixar/RenderManProServer-26.3",
             "denoise_exe": "denoise_batch",
             "pixar_license": "9010@x",
             "tiled_denoise_threshold": 2048,
@@ -123,34 +117,37 @@ def test_renderman_name_and_combine_flag():
     backend = RendermanDenoiser()
     assert backend.name == "renderman"
     assert backend.requires_combine is True
-    assert backend.wrapper_filename == "renderman_denoise.py"
+    assert backend.wrapper_filename == ""
+
+
+def test_renderman_executable_is_native_denoise_batch():
+    backend = RendermanDenoiser()
+    assert backend.get_executable(RM_SETTINGS) == \
+        "/opt/pixar/RenderManProServer-26.3/bin/denoise_batch"
 
 
 def test_renderman_arguments_basic(monkeypatch):
     backend = _rm_backend(monkeypatch)
-    instance = make_instance()
-    args = backend.get_arguments(instance, RM_SETTINGS)
-    assert args.startswith("L:/scripts/")
-    assert "--rmantree-linux /opt/pixar/RenderManProServer-26.3" in args
-    assert "--denoise-exe-name denoise_batch" in args
-    assert "--pixar-license 9010@x" in args
-    assert "--denoise-exe " not in args
-    assert "--input /renders/shot/main/shot_main.1001.exr" in args
-    assert "--output-dir /renders/shot/main/denoised" in args
-    assert "--frame-start 1001" in args
-    assert "--frame-end 1100" in args
+    args = backend.get_arguments(make_instance(), RM_SETTINGS)
+    assert "-a 0" in args
+    assert "--clean-alpha" in args
+    assert "--progress" in args
+    assert "-o /renders/shot/main/denoised" in args
+    assert "/renders/shot/main/shot_main.1001.exr" in args
+    assert "1001-1100" in args
     # 100 frames >= 8 -> cross-frame on; not a large image -> no tiles
-    assert "--cross-frame" in args
+    assert "-cf" in args
     assert "--tiles" not in args
-    assert "--rename Ci.r=R" in args
-    assert "--rename a.Z=A" in args
+    # no wrapper, no python, no rename flags
+    assert "renderman_denoise.py" not in args
+    assert "--rename" not in args
 
 
 def test_renderman_arguments_short_range_no_cross_frame(monkeypatch):
     backend = _rm_backend(monkeypatch)
     instance = make_instance(frameStartHandle=1001, frameEndHandle=1004)
     args = backend.get_arguments(instance, RM_SETTINGS)
-    assert "--cross-frame" not in args
+    assert "-cf" not in args
 
 
 def test_renderman_arguments_custom_frames_drive_cross_frame(monkeypatch):
@@ -163,7 +160,7 @@ def test_renderman_arguments_custom_frames_drive_cross_frame(monkeypatch):
             "frames": "1001-1010",
         }})
     args = backend.get_arguments(instance, RM_SETTINGS)
-    assert "--cross-frame" in args
+    assert "-cf" in args
 
 
 def test_renderman_arguments_large_image_enables_tiles(monkeypatch):
@@ -175,13 +172,16 @@ def test_renderman_arguments_large_image_enables_tiles(monkeypatch):
 def test_renderman_environment():
     backend = RendermanDenoiser()
     env = backend.get_environment(RM_SETTINGS)
-    assert env == {}
+    assert env == {
+        "RMANTREE": "/opt/pixar/RenderManProServer-26.3",
+        "PIXAR_LICENSE_FILE": "9010@x",
+    }
 
 
-def test_renderman_validate_requires_wrapper_path():
+def test_renderman_validate_requires_rmantree():
     backend = RendermanDenoiser()
-    bad = {"shared": {"scripts_directory": ""}}
-    with pytest.raises(RuntimeError, match="scripts_directory"):
+    bad = {"denoise": {"renderman": {"rmantree_path": ""}}}
+    with pytest.raises(RuntimeError, match="rmantree_path"):
         backend.validate(make_instance(), bad)
 
 
