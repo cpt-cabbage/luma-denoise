@@ -638,3 +638,31 @@ def test_resolve_rename_map_pass_through_ignores_manifest(tmp_path):
         verbose=False,
     )
     assert rename_map == {"beauty.r": "R"}
+
+
+# --- worker-side resolution helpers ----------------------------------------
+
+
+def test_build_tool_path_windows_appends_exe():
+    """build_tool_path appends .exe on Windows and joins root/bin/exe."""
+    assert (oiio_combine.build_tool_path("C:/oiio", "oiiotool", "windows")
+            == "C:/oiio/bin/oiiotool.exe")
+
+
+def test_parse_args_accepts_oiio_root_flags():
+    """parse_args should accept per-OS root flags without --oiiotool."""
+    args = oiio_combine.parse_args([
+        "--denoised", "/a/d.1001.exr",
+        "--raw", "/a/r.1001.exr",
+        "--output", "/a/o.1001.exr",
+        "--oiio-root-linux", "/opt/oiio",
+        "--oiio-root-windows", "C:/oiio",
+        "--oiio-root-darwin", "",
+        "--oiio-exe-name", "oiiotool",
+    ])
+    assert args.oiio_root_linux == "/opt/oiio"
+    assert args.oiio_root_windows == "C:/oiio"
+    assert args.oiio_root_darwin == ""
+    assert args.oiio_exe_name == "oiiotool"
+    # Legacy flag should default to empty (optional now)
+    assert args.oiiotool == ""
