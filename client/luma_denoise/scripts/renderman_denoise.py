@@ -8,7 +8,8 @@ sidecar next to the denoised frames describing the output channel naming.
 The downstream oiio_combine.py wrapper reads that sidecar.
 
 Standalone by design: deploy this single file to a shared filesystem (the
-'renderman.wrapper_script_path' luma-denoise setting points at it).
+'shared.scripts_directory' luma-denoise setting points at the folder that
+holds it).
 
 Usage:
     python renderman_denoise.py

@@ -33,7 +33,7 @@ Run tests with `python -m pytest tests -v` (no linter or CI pipeline). Python ta
 
 ## Version Management
 
-Single source of truth: `package.py` (`version = "0.0.10"`).
+Single source of truth: `package.py` (`version = "0.6.0"`).
 
 `create_package.py` auto-generates `client/luma_denoise/version.py` at build time from `package.py`, so you only need to update `package.py` when bumping versions.
 

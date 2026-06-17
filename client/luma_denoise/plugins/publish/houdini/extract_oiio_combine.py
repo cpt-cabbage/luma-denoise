@@ -8,11 +8,6 @@ from ayon_core.pipeline import AYONPyblishPluginMixin
 from ayon_deadline import abstract_submit_deadline
 from luma_denoise.denoisers.base import DenoiserBackend, resolve_wrapper_path
 
-try:
-    from luma_denoise.version import __version__ as _ADDON_VERSION
-except Exception:
-    _ADDON_VERSION = "unknown"
-
 
 # Default exclude patterns mirror the server settings default. Kept here as a
 # safety net in case the settings entry is missing from project bundles.
