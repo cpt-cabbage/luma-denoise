@@ -43,15 +43,16 @@ def test_base_resolve_wrapper_path_substitutes_version():
     backend.name = "renderman"
     backend.wrapper_filename = "renderman_denoise.py"
     out = backend._resolve_wrapper_path(
-        {"denoise": {"renderman": {"wrapper_script_path": "L:/s/{version}/renderman_denoise.py"}}})
+        {"shared": {"scripts_directory": "L:/s/{version}"}})
     assert "{version}" not in out and out.endswith("/renderman_denoise.py")
 
 
 def test_base_resolve_wrapper_path_empty_raises():
     backend = base.DenoiserBackend()
     backend.name = "renderman"
-    with pytest.raises(RuntimeError, match="wrapper_script_path"):
-        backend._resolve_wrapper_path({"denoise": {"renderman": {"wrapper_script_path": ""}}})
+    backend.wrapper_filename = "renderman_denoise.py"
+    with pytest.raises(RuntimeError, match="scripts_directory"):
+        backend._resolve_wrapper_path({"shared": {"scripts_directory": ""}})
 
 
 def test_resolve_wrapper_path_joins_dir_and_filename():
@@ -107,6 +108,7 @@ from denoisers.renderman import RendermanDenoiser  # noqa: E402
 RM_SETTINGS = {
     "shared": {
         "python_executable": "/usr/bin/python3",
+        "scripts_directory": "L:/scripts/{version}",
         "oiio_root_path": {"windows": "C:/oiio", "linux": "/opt/oiio", "darwin": ""},
         "oiio_exe": "oiiotool",
     },
@@ -117,7 +119,6 @@ RM_SETTINGS = {
             "denoise_exe": "denoise_batch",
             "pixar_license": "9010@x",
             "tiled_denoise_threshold": 2048,
-            "wrapper_script_path": "L:/scripts/{version}/renderman_denoise.py",
             "beauty_rename_map": [
                 {"source": "Ci.r", "target": "R"},
                 {"source": "a.Z", "target": "A"},
@@ -195,8 +196,8 @@ def test_renderman_environment():
 
 def test_renderman_validate_requires_wrapper_path():
     backend = RendermanDenoiser()
-    bad = {"denoise": {"renderman": {"wrapper_script_path": ""}}}
-    with pytest.raises(RuntimeError, match="denoise.renderman.wrapper_script_path"):
+    bad = {"shared": {"scripts_directory": ""}}
+    with pytest.raises(RuntimeError, match="scripts_directory"):
         backend.validate(make_instance(), bad)
 
 
@@ -213,6 +214,7 @@ from denoisers.oidn import OidnDenoiser  # noqa: E402
 OIDN_SETTINGS = {
     "shared": {
         "python_executable": "/usr/bin/python3",
+        "scripts_directory": "L:/scripts/{version}",
         "oiio_root_path": {"windows": "C:/oiio", "linux": "/opt/oiio", "darwin": ""},
         "oiio_exe": "oiiotool",
     },
@@ -221,7 +223,6 @@ OIDN_SETTINGS = {
         "oidn": {
             "oidn_root_path": {"linux": "/opt/oidn", "windows": "", "darwin": ""},
             "denoise_exe": "oidnDenoise",
-            "wrapper_script_path": "L:/scripts/{version}/oidn_denoise.py",
             "beauty_channel": "beauty",
             "albedo_channel": "albedo",
             "normal_channel": "N",
@@ -277,8 +278,9 @@ def test_oidn_environment_returns_empty():
 
 def test_oidn_validate_requires_wrapper_path():
     backend = OidnDenoiser()
-    bad = _oidn_settings_with(wrapper_script_path="")
-    with pytest.raises(RuntimeError, match="oidn.wrapper_script_path"):
+    bad = _oidn_settings_with()
+    bad["shared"]["scripts_directory"] = ""
+    with pytest.raises(RuntimeError, match="scripts_directory"):
         backend.validate(make_instance(), bad)
 
 
